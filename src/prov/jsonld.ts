@@ -102,7 +102,11 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
     ...optionalNumber('provision:width', a.width, `${XSD}integer`),
     ...optionalNumber('provision:height', a.height, `${XSD}integer`),
-    ...(a.used.length > 0 ? { used: refs(a.used) } : {}),
+    // 派生元の画像も、人間が参照した外部リソースも、PROV としては同じ prov:used。
+    // 区別は Entity 側の wasDerivedFrom が持つ
+    ...(a.used.length + a.referenced.length > 0
+      ? { used: refs([...a.used, ...a.referenced]) }
+      : {}),
     ...(a.wasAssociatedWith.length > 0
       ? { wasAssociatedWith: refs(a.wasAssociatedWith) }
       : {}),
@@ -133,7 +137,7 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
   // 関係は実体ノードとしても並べる（viz が辺を描くのはこちら）。
   // @id は付けない。付けると viz が関係そのものを孤立ノードとして描いてしまう
   for (const a of data.activities) {
-    for (const used of a.used) {
+    for (const used of [...a.used, ...a.referenced]) {
       nodes.push({ '@type': 'Usage', activity: a.id, entity: used })
     }
     nodes.push({ '@type': 'Generation', activity: a.id, entity: a.generated })
@@ -204,9 +208,14 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
     return v === undefined ? undefined : String(v)
   }
 
+  // prov:used に並んでいるうち、このグラフの画像 Entity であるものが派生元。
+  // それ以外は人間が参照した外部リソース
+  const localEntities = new Set(entities.map((e) => e.id))
+
   const activities: GenerationActivity[] = activityNodes.map((n) => {
     const id = n['@id'] as string
     const generated = generatedBy.get(id) ?? ''
+    const usedAll = idList(n, 'used')
     return {
       id,
       label: String(firstValue(n, 'label') ?? id),
@@ -232,7 +241,8 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
       ...(num(n, 'provision:height') !== undefined
         ? { height: num(n, 'provision:height')! }
         : {}),
-      used: idList(n, 'used').slice().sort(),
+      used: usedAll.filter((iri) => localEntities.has(iri)).sort(),
+      referenced: usedAll.filter((iri) => !localEntities.has(iri)).sort(),
       generated,
       wasAssociatedWith: idList(n, 'wasAssociatedWith').slice().sort(),
     }

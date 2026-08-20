@@ -42,6 +42,15 @@ export interface GenerationActivity extends ReproducibleSpec {
   height?: number
   /** 派生元の画像。空なら根（初回生成） */
   used: Iri[]
+  /**
+   * 図版を作るときに人間が参照した外部リソースの IRI
+   * （asterism の測定曲線・試料など）。
+   *
+   * 機械が消費したわけではないので `wasDerivedFrom` は張らない。
+   * 「著者がこれを見てこの図を作らせた」という実在する事実だけを
+   * `prov:used` として書く。責任者は wasAssociatedWith の人間 Agent。
+   */
+  referenced: Iri[]
   /** この Activity が生んだ画像 */
   generated: Iri
   wasAssociatedWith: Iri[]

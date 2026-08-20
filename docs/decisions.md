@@ -94,3 +94,37 @@ IRI は `{base}/resource/image/{sha256}`。
 **`prov:Derivation` の実体ノードは書かない。** viz は辺を描かず、孤立ノードが増えるだけだった。
 派生は Entity 側の `prov:wasDerivedFrom` として直接持たせてあり、SPARQL からはそちらで引ける
 （`?new prov:wasDerivedFrom ?old`）。詳細が要る場合も `wasGeneratedBy` + `used` で辿れる。
+
+---
+
+## D-006 データへの接合点 — 「人間が参照した」として `prov:used` だけ張る
+
+**決定**: 図版が元データ（asterism の curve / sample）と繋がる辺は、
+生成 Activity の `prov:used` として書く。**`prov:wasDerivedFrom` は張らない。**
+責任者は `prov:wasAssociatedWith` の人間 Agent。
+
+**なぜ**
+- 画像生成モデルはプロンプトを消費しただけで、測定曲線を読んでいない。
+  「この曲線から派生した」と書けば**それは来歴の嘘**になる
+- 一方「著者がこの曲線を見て、この図を作らせた」は実在する事実で、
+  `prov:used` ＋ 人間 Agent への `wasAssociatedWith` で正確に書ける
+- 新語彙が 1 つも要らない。asterism 側は素の PROV でこれを読める
+
+**捨てたもの**: 図版とデータを `wasDerivedFrom` で直結すること。
+横断クエリは書きやすくなるが、グラフが嘘をつく。
+
+**副作用**: `wasDerivedFrom` は画像の親だけを指すので、
+`prov:wasDerivedFrom*` の推移閉包が「画像の系譜」だけを正しく辿る。
+外部リソースが混ざらないのは、この分離のおかげ。
+
+---
+
+## D-007 RDF への出口 — N-Triples を自前で書く
+
+**決定**: asterism（Oxigraph）へ載せるための N-Triples は、JSON-LD ライブラリで
+展開せず、`src/prov/ntriples.ts` が素の PROV の IRI を直接書く。
+
+**なぜ**: JSON-LD の展開は `@context` をネットワークから取りに行く。
+`provision-schema` の URL はまだ実在せず、openprovenance も外部依存になる。
+グラフの形はこちらが完全に決めているので、直接書く方が決定論的でオフラインで動く。
+`@context` を配信し始めたら、後から標準の展開に差し替えてもよい（出力は一致するはず）。

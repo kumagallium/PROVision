@@ -1,0 +1,39 @@
+# 「この図版は、どのデータのどの版に基づいているか」
+#
+# PROVision の図版グラフと asterism の測定データグラフを 1 本の SPARQL で跨ぐ。
+# 接合点は prov:used ただ 1 つ。変換も対応表も要らない。
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX dcterms:   <http://purl.org/dc/terms/>
+PREFIX schema:    <https://schema.org/>
+PREFIX sd:        <https://kumagallium.github.io/asterism/starrydata/ontology#>
+PREFIX provision: <https://kumagallium.github.io/provision-schema/releases/1.0/context.jsonld#>
+
+SELECT ?世代 ?参照した曲線 ?物性 ?試料 ?論文 ?インジェスト実行
+WHERE {
+  # 起点: 投稿版の図版
+  VALUES ?figure { <FIGURE_IRI> }
+
+  # 図版そのもの、またはその祖先（* で 0 世代以上さかのぼる）
+  ?figure prov:wasDerivedFrom* ?ancestor .
+  ?ancestor rdfs:label ?世代 .
+
+  # その世代を生んだ生成 Activity が、人間の参照として使った曲線
+  ?ancestor prov:wasGeneratedBy ?act .
+  ?act prov:used ?curve .
+
+  # ここから先は asterism のグラフ
+  ?curve a sd:Curve ;
+         dcterms:identifier ?参照した曲線 ;
+         sd:propertyY ?物性 ;
+         sd:ofSample ?sample ;
+         prov:wasGeneratedBy ?ingest .
+  ?sample schema:name ?試料 ;
+          sd:fromPaper ?paper .
+  ?paper schema:name ?論文 .
+
+  # 元データの「版」= どのインジェスト実行で入ったか
+  FILTER(CONTAINS(STR(?ingest), "/ingestion/"))
+  BIND(REPLACE(STR(?ingest), "^.*/ingestion/", "") AS ?インジェスト実行)
+}
+ORDER BY ?世代 ?参照した曲線

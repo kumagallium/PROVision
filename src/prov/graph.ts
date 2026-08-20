@@ -52,6 +52,8 @@ export interface RecordGenerationInput {
 
   /** 派生元の画像 Entity の IRI。空なら根 */
   derivedFrom?: Iri[]
+  /** 人間が参照した外部リソースの IRI（asterism の curve / sample など） */
+  referenced?: Iri[]
   agents?: Iri[]
 }
 
@@ -180,6 +182,7 @@ export class ProvGraph {
       ...(input.width !== undefined ? { width: input.width } : {}),
       ...(input.height !== undefined ? { height: input.height } : {}),
       used,
+      referenced: [...(input.referenced ?? [])].sort(),
       generated: entityId,
       wasAssociatedWith: [...(input.agents ?? [])].sort(),
     }

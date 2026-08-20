@@ -44,6 +44,34 @@ pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
 書き出した JSON-LD は [prov-jsonld-viz](https://github.com/kumagallium/prov-jsonld-viz)
 にそのまま貼れば派生グラフとして描画される（実機で確認済み）。
 
+## 横断クエリ（グラフでしかできないこと）
+
+図版の系譜と、asterism が持つ測定データを **1 本の SPARQL で跨ぐ**。
+接合点は `prov:used` ただ 1 つで、変換も対応表も要らない。
+
+```bash
+git clone https://github.com/kumagallium/asterism ~/develop/asterism
+pnpm tsx scripts/make-figure-lineage.ts
+./scripts/crossgraph-query.sh queries/figure-to-data.rq   # docker が要る
+```
+
+投稿版の図版 1 つを起点にすると、こう返る:
+
+| 世代 | 参照した曲線 | 物性 | 試料 | 論文 | インジェスト実行 |
+|---|---|---|---|---|---|
+| GA v1 | 1171-316-665 | Seebeck coefficient | CC1 | Boron-Doped Ba8Al14Si31 Clathrate… | run-20260604T172858Z |
+| GA v1 | 1171-318-665 | ZT | CC1 | 同上 | run-20260604T172858Z |
+
+投稿版から 3 世代さかのぼって、著者が参照した測定曲線に行き当たり、
+そこから試料・論文・**元データがどのインジェスト実行で入ったか（＝データの版）**まで届く。
+枝分かれした別案（単色版）は投稿版の祖先ではないので、正しく除外される。
+
+図版とデータの辺は `prov:wasDerivedFrom` ではなく `prov:used` である。
+画像生成モデルは測定曲線を読んでいないので、派生と書けば来歴が嘘になる。
+「著者がこれを見てこの図を作らせた」という実在する事実だけを書く（[D-006](docs/decisions.md)）。
+
+`queries/figure-intents.rq` は「どの指示の連なりで今の形になったか」を返す。
+
 ## 決めたこと
 
 段階間の契約は [`docs/decisions.md`](docs/decisions.md) にある。要点:
@@ -54,6 +82,7 @@ pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
 | Activity | prompt / model / seed / 時刻は**必須**。欠けたら記録を拒否する |
 | 意図 | Activity の `provision:intent`。辺は素の `wasDerivedFrom` のまま |
 | 語彙 | 素の PROV ＋ `provision` の最小拡張のみ |
+| データへの辺 | `prov:used`（人間が参照した事実）。`wasDerivedFrom` は張らない |
 
 ## 不変条件
 

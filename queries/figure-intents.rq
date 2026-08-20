@@ -1,0 +1,16 @@
+# 「この図版は、どの指示の連なりでこうなったか」
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX provision: <https://kumagallium.github.io/provision-schema/releases/1.0/context.jsonld#>
+
+SELECT ?時刻 ?版 ?指示 ?seed
+WHERE {
+  VALUES ?figure { <FIGURE_IRI> }
+  ?figure prov:wasDerivedFrom* ?ancestor .
+  ?ancestor rdfs:label ?版 ;
+            prov:wasGeneratedBy ?act .
+  ?act prov:startedAtTime ?時刻 ;
+       provision:seed ?seed .
+  OPTIONAL { ?act provision:intent ?指示 }
+}
+ORDER BY ?時刻
