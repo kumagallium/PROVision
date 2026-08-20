@@ -123,6 +123,35 @@ jobs:
           includeUpdaterJson: false
           args: --target ${{ matrix.target }}
 
+      # tauri-action が公証・staple するのは .app だけで、そこから作る DMG には
+      # チケットが付かない。人がダウンロードするのは DMG のほうなので、
+      # ここで公証し直して staple し、Release のものを差し替える。
+      # （v0.1.0 で `spctl: rejected / source=Unnotarized Developer ID` を実測）
+      - name: Notarize and staple the DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # step の if: からは secrets を参照できないので、シェル内でガードする
+          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ]; then
+            echo "Apple の資格情報が無いので DMG の公証は飛ばす"
+            exit 0
+          fi
+          DMG=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          echo "対象: $DMG"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG"
+          # 判定が通らないなら配らない
+          spctl -a -t open --context context:primary-signature -v "$DMG"
+          gh release upload "${{ needs.resolve-release.outputs.tag }}" "$DMG" \
+            --clobber --repo "${{ github.repository }}"
+
   # 署名して latest.json を作り、Pages（真実源）と Release の両方に置く
   publish-updater:
     needs: [resolve-release, build]
