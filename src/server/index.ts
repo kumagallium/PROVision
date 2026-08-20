@@ -51,6 +51,22 @@ async function persist() {
 
 const app = new Hono()
 
+/**
+ * 生きているかと、どの版のサイドカーかを返す。
+ *
+ * 配布パイプラインの smoke test がここを叩く。自動更新の直後に旧版のサイドカーが
+ * ポートを握ったまま生き残ると、新しい API が 404 になる——画面はこの版を見て
+ * 食い違いに気づける。
+ */
+app.get('/api/health', (c) =>
+  c.json({
+    ok: true,
+    pid: process.pid,
+    version: process.env.PROVISION_APP_VERSION ?? 'dev',
+    dataDir: DATA_DIR,
+  }),
+)
+
 app.get('/api/graph', (c) => c.json(toProvJsonLd(graph)))
 
 /** 画像を配る。ファイル名しか受け取らないので、data の外は読めない */

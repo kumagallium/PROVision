@@ -46,6 +46,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://kumagallium.github.io/PROVision/updater/latest.json",
         "https://github.com/kumagallium/PROVision/releases/latest/download/latest.json"
       ],
       "pubkey": "PLACEHOLDER_REPLACE_WITH_MINISIGN_PUBLIC_KEY"

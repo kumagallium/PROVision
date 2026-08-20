@@ -13,13 +13,44 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # version は指定しない。package.json の packageManager と衝突してエラーになる
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: 24
           cache: pnpm
+
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build:web
+
+      # サイドカーとして配るバンドルが、実際に起動して応答するかを見る。
+      # ESM bundle に __dirname が無い罠、依存が package 内の資産を読みに行って
+      # 起動即死する罠を、配布より前のこの段階で拾う
+      - name: Smoke test bundled sidecar
+        run: |
+          set -euo pipefail
+          node scripts/bundle-server.mjs
+          PORT=13001
+          DATA_DIR=$(mktemp -d)
+          PROVISION_PORT=$PORT PROVISION_DATA_DIR=$DATA_DIR \
+            node src-tauri/sidecar/server.mjs > /tmp/sidecar-smoke.log 2>&1 &
+          SIDECAR_PID=$!
+          trap "kill $SIDECAR_PID 2>/dev/null || true" EXIT
+          for i in $(seq 1 15); do
+            if curl -fsS "http://127.0.0.1:${PORT}/api/health" > /tmp/health.json 2>/dev/null; then
+              echo "Sidecar healthy after ${i}s"; cat /tmp/health.json; echo
+              curl -fsS "http://127.0.0.1:${PORT}/api/graph" | head -c 200; echo
+              exit 0
+            fi
+            if ! kill -0 $SIDECAR_PID 2>/dev/null; then
+              echo "ERROR: sidecar died"; cat /tmp/sidecar-smoke.log; exit 1
+            fi
+            sleep 1
+          done
+          echo "ERROR: sidecar did not respond within 15s"; cat /tmp/sidecar-smoke.log; exit 1

@@ -11,3 +11,6 @@ versionFile = src-tauri/tauri.conf.json,package.json
 releaseBranch = main
 vPrefix = true
 changelog = true
+# バージョン昇格は merged PR のラベルで決める。既定は patch
+majorLabels = major
+minorLabels = minor

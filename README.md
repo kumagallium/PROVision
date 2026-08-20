@@ -97,16 +97,44 @@ Tauri。画面はブラウザ版とまったく同じで、画像生成とグラ
 
 ### リリース
 
-tagpr（`.tagpr`）＋ GitHub Actions。`main` に入ると tagpr がリリース PR を作り、
-merge でタグが打たれ、`desktop-build.yml` が macOS (Apple Silicon) の配布物を組んで
-Release に添付する。
+tagpr ＋ GitHub Actions。Graphium / asterism と同じ運用に揃えてある。
 
-**まだ設定が要るもの**（どちらも鍵と証明書なので、リポジトリの持ち主が用意する）:
+1. PR を main にマージする
+2. tagpr が「次のリリース用 PR」を自動で作る／更新する（**手を入れずマージするだけ**）
+3. マージするとタグが打たれ、`desktop-release.yml` が macOS (Apple Silicon) を組む
+4. 署名した `latest.json` を **GitHub Pages（`docs/updater/latest.json`）** に置く
 
-| 要るもの | 作り方 |
+昇格は merged PR のラベルで決める（既定は patch。`major` / `minor` を貼る）。
+
+**自動更新の真実源は Pages 側。** `releases/latest/download` は tagpr の publish 直後に
+新タグを指すが、実ビルドは十数分かかるので、その間クライアントが 404 を踏む。
+
+壊れた案内を配らないための歯止めを 3 つ入れてある:
+
+| 歯止め | 何を防ぐか |
 |---|---|
-| `tauri.conf.json` の `pubkey` | `pnpm tauri signer generate -w ~/.tauri/provision.key`。公開鍵を貼り、秘密鍵は `TAURI_SIGNING_PRIVATE_KEY` に入れる |
-| 署名・公証 | `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` |
+| 署名が空なら publish を中止 | 署名なしの `latest.json` を配ると、クライアントは以後更新できなくなる |
+| `sort -V` で配信中の版と比較 | 過去タグのワークフローを再実行しても、古い版を全員に offer しない |
+| `release-drift-check.yml`（日次） | ビルドが落ちて `latest.json` が再生成されないと、更新が古い版に固定される。それを別経路で見る |
+
+配布前に **サイドカーの smoke test** を必ず通す（`/api/health` に応答するか）。
+ESM バンドルに `__dirname` が無い罠と、新しい依存が package 内の資産を読みに行って
+起動即死する罠を、ここで拾う。
+
+サードパーティ action は commit SHA で固定してある（タグは可変で、上書きされると
+成果物に任意コードを混ぜられる）。更新は Dependabot が PR で提案する。
+
+**まだ設定が要るもの**（鍵と資格情報なので、リポジトリの持ち主が入れる）:
+
+| Secret | 用意の仕方 |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | `pnpm tauri signer generate -w ~/.tauri/provision.key`。公開鍵は `tauri.conf.json` の `pubkey` に貼る |
+| `APPLE_CERTIFICATE` | Developer ID の `.p12` を base64 にしたもの |
+| `APPLE_CERTIFICATE_PASSWORD` | その `.p12` のパスワード |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: ...（TEAMID）` |
+| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | 公証用。`APPLE_PASSWORD` は App 用パスワード |
+
+Secrets が無くても組める（署名なし。Gatekeeper の警告が出るが動く）。
 
 ## 横断クエリ（グラフでしかできないこと）
 

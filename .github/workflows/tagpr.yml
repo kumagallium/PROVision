@@ -7,28 +7,32 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # gh workflow run を打つのに要る。無いと 403 で落ちる
   actions: write
 
 jobs:
   tagpr:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # サードパーティ action はタグではなく commit SHA で固定する。
+      # タグは可変なので、上書きされると成果物へ任意コードを混ぜられる。
+      # 更新は Dependabot（.github/dependabot.yml）が PR で提案する
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: Songmu/tagpr@v1
+      - uses: Songmu/tagpr@d1b8138b7a31075141b6cd64103de9485ced7ac9 # v1.20.1
         id: tagpr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # タグが作られたら、デスクトップのビルドを起こす。
-      # tagpr は GITHUB_TOKEN で push するので、release イベントからは workflow が
-      # 起動しない（GitHub の仕様）。ここから明示的に叩く必要がある
-      - name: Trigger desktop build
+      # タグが打たれた回だけ、デスクトップのビルドを明示的に起こす。
+      # tagpr は GITHUB_TOKEN で push するので、GitHub の no-recursion 制約により
+      # release / push:tags イベントからは workflow が起動しない
+      - name: Trigger desktop release
         if: steps.tagpr.outputs.tag != ''
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "New tag: ${{ steps.tagpr.outputs.tag }}"
-          gh workflow run "Desktop Build" -f release_tag="${{ steps.tagpr.outputs.tag }}"
+          gh workflow run desktop-release.yml -f release_tag="${{ steps.tagpr.outputs.tag }}"

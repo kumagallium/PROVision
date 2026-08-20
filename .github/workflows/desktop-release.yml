@@ -1,0 +1,224 @@
+name: Desktop Release
+
+# タグが打たれたら、デスクトップアプリを組んで Release に添付し、
+# 自動更新の案内（latest.json）を作って GitHub Pages で配る。
+#
+# tagpr は GITHUB_TOKEN で push するので release イベントからは起動しない
+# （GitHub の no-recursion 制約）。tagpr.yml が workflow_dispatch で明示的に叩く。
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "ビルドするタグ（例: v0.2.0）"
+        required: true
+
+permissions:
+  contents: write
+  # Pages のデプロイを起こすのに要る。既定の GITHUB_TOKEN には無く、明示しないと 403
+  actions: write
+  # ビルドが静かに失敗して「更新されない」で気づく事故を防ぐため、失敗時に Issue を起票する
+  issues: write
+
+env:
+  MAC_BUNDLE: PROVision_aarch64.app.tar.gz
+
+jobs:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.resolve.outputs.release_id }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const tag = '${{ inputs.release_tag }}';
+            core.setOutput('tag', tag);
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag,
+            });
+            core.setOutput('release_id', release.id);
+
+  # macOS Apple Silicon のみ。ほかのターゲットは通しで検証する人がいないので出さない
+  build:
+    needs: resolve-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macOS (Apple Silicon)
+
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.tag }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # version は指定しない。package.json の packageManager と衝突する
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Bundle Node.js runtime for sidecar
+        run: node scripts/fetch-node.mjs
+
+      - name: Bundle server
+        run: node scripts/bundle-server.mjs
+
+      # バンドル直後に実起動して確かめる。ESM bundle に __dirname が無い罠、
+      # 新しい依存が package 内の資産を読みに行って起動即死する罠を、配布前に拾う
+      - name: Smoke test bundled sidecar
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=13001
+          DATA_DIR=$(mktemp -d)
+          PROVISION_PORT=$PORT PROVISION_DATA_DIR=$DATA_DIR \
+            node src-tauri/sidecar/server.mjs > /tmp/sidecar-smoke.log 2>&1 &
+          SIDECAR_PID=$!
+          trap "kill $SIDECAR_PID 2>/dev/null || true" EXIT
+          for i in $(seq 1 15); do
+            if curl -fsS "http://127.0.0.1:${PORT}/api/health" > /tmp/health.json 2>/dev/null; then
+              echo "Sidecar healthy after ${i}s"; cat /tmp/health.json; echo; exit 0
+            fi
+            if ! kill -0 $SIDECAR_PID 2>/dev/null; then
+              echo "ERROR: sidecar died"; cat /tmp/sidecar-smoke.log; exit 1
+            fi
+            sleep 1
+          done
+          echo "ERROR: sidecar did not respond within 15s"; cat /tmp/sidecar-smoke.log; exit 1
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Apple Developer ID の署名と公証。tauri-action が APPLE_CERTIFICATE
+          # （base64 の .p12）を一時 Keychain に読み込み、APPLE_SIGNING_IDENTITY で
+          # 署名し、APPLE_ID + APPLE_PASSWORD（App 用パスワード）で公証へ出す。
+          # secrets が無ければ署名なしで組む（Gatekeeper の警告は出るが動く）
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          releaseId: ${{ needs.resolve-release.outputs.release_id }}
+          # updater の JSON は tauri-action に任せない（署名の扱いが不安定で、
+          # Graphium で実害が出た）。.app.tar.gz だけ上げさせ、案内は次のジョブで作る
+          includeUpdaterJson: false
+          args: --target ${{ matrix.target }}
+
+  # 署名して latest.json を作り、Pages（真実源）と Release の両方に置く
+  publish-updater:
+    needs: [resolve-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+
+      - name: Download and sign updater bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-release.outputs.tag }}"
+          mkdir -p /tmp/assets
+          gh release download "$TAG" --pattern "$MAC_BUNDLE" --dir /tmp/assets \
+            --repo "${{ github.repository }}" --clobber
+          tauri signer sign "/tmp/assets/$MAC_BUNDLE" -k "$TAURI_SIGNING_PRIVATE_KEY" -p ""
+          ls -la /tmp/assets/
+
+      - name: Build and verify latest.json
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-release.outputs.tag }}"
+          VERSION="${TAG#v}"
+          SIG_FILE="/tmp/assets/${MAC_BUNDLE}.sig"
+
+          # 署名が無い＝バンドルが欠けたか署名に失敗した。壊れた案内（署名空・URL 無し）
+          # を配ると、クライアントは以後更新できなくなる。ここで必ず止める
+          if [ ! -s "$SIG_FILE" ]; then
+            echo "::error::${MAC_BUNDLE} の署名が無い。latest.json は publish しない"
+            exit 1
+          fi
+
+          jq -n \
+            --arg v "$VERSION" \
+            --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg sig "$(cat "$SIG_FILE")" \
+            --arg url "https://github.com/${{ github.repository }}/releases/download/${TAG}/${MAC_BUNDLE}" \
+            '{version: $v, notes: "変更点は CHANGELOG を参照", pub_date: $d,
+              platforms: {"darwin-aarch64": {signature: $sig, url: $url}}}' \
+            > /tmp/latest.json
+          cat /tmp/latest.json
+
+          # 過去タグのワークフローを再実行しても、古い版を全員に offer しない
+          CURRENT="$(jq -r '.version // "0.0.0"' docs/updater/latest.json)"
+          NEWEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)"
+          if [ "$NEWEST" != "$VERSION" ] && [ "$CURRENT" != "$VERSION" ]; then
+            echo "::error::配信中の ${CURRENT} より古い ${VERSION} は publish しない"
+            exit 1
+          fi
+
+      - name: Upload latest.json to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.resolve-release.outputs.tag }}" /tmp/latest.json \
+            --clobber --repo "${{ github.repository }}"
+
+      # Pages が真実源。releases/latest/download は tagpr の publish 直後に
+      # 新タグを指すが、実ビルドは十数分かかるので、その間クライアントが 404 を踏む
+      - name: Publish latest.json to Pages feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cp /tmp/latest.json docs/updater/latest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/updater/latest.json
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: publish updater latest.json for ${{ needs.resolve-release.outputs.tag }} [skip ci]"
+          git push
+          gh workflow run deploy-pages.yml --repo "${{ github.repository }}"
+
+  # 公証の失敗（Apple 規約の失効など）は静かに落ちて「更新されない」で気づく事故になる
+  notify-on-failure:
+    needs: [resolve-release, build, publish-updater]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create release-failure --color b60205 \
+            --description "Release/desktop build pipeline failure" \
+            --repo "${{ github.repository }}" 2>/dev/null || true
+          gh issue create --repo "${{ github.repository }}" \
+            --label release-failure \
+            --title "Desktop build failed for ${{ needs.resolve-release.outputs.tag }}" \
+            --body "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"

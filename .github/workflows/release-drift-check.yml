@@ -1,0 +1,130 @@
+name: Release Update Drift Check
+
+# 「最新リリースのタグ」と「Pages が配信している latest.json の version」が
+# 乖離していないか毎日見る。
+#
+# 背景（Graphium で実害）: 公証の 403 などでビルドが落ちると、リリース自体は
+# publish されるのに latest.json が再生成されず、自動更新が古い版に固定される。
+# desktop-release.yml の notify-on-failure はビルド失敗を拾うが、こちらは
+# 「結果として更新が出ていない」状態を別経路で直接見る二重の網。
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const url = 'https://kumagallium.github.io/PROVision/updater/latest.json';
+
+            // release-failure ラベル付き Issue を重複なしで起票する
+            const openIssueOnce = async (title, body) => {
+              const existing = await github.rest.issues.listForRepo({
+                owner, repo, state: 'open', labels: 'release-failure', per_page: 100,
+              });
+              if (existing.data.some((i) => i.title === title)) {
+                core.info(`既に open な Issue がある（"${title}"）。重複起票しない`);
+                return;
+              }
+              await github.rest.issues.createLabel({
+                owner, repo, name: 'release-failure', color: 'b60205',
+                description: 'Release/desktop build pipeline failure',
+              }).catch(() => {});
+              const created = await github.rest.issues.create({
+                owner, repo, title, body, labels: ['release-failure'],
+              });
+              core.notice(`Issue #${created.data.number} を起票した`);
+            };
+
+            const releases = await github.rest.repos.listReleases({ owner, repo, per_page: 30 });
+            const stable = releases.data
+              .filter((r) => !r.draft && !r.prerelease)
+              .sort((a, b) => new Date(b.published_at) - new Date(a.published_at))[0];
+            if (!stable) {
+              core.info('安定版リリースが無い。何も見ない');
+              return;
+            }
+            const releaseVersion = stable.tag_name.replace(/^v/, '');
+
+            // リリース直後はビルド進行中で乖離が正常。6 時間以上経ったものだけ見る
+            const ageHours = (Date.now() - new Date(stable.published_at).getTime()) / 3_600_000;
+            if (ageHours < 6) {
+              core.info(`${stable.tag_name} は ${ageHours.toFixed(1)}h 前（< 6h）。ビルド中の誤検知を避けて飛ばす`);
+              return;
+            }
+
+            // 取得失敗そのものが「更新経路が壊れている」状態なので、乖離と同じく起票する。
+            // 一時的なネットワーク断での誤検知を避けるため 3 回試す
+            let res = null;
+            let lastError = '';
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                res = await fetch(url, { cache: 'no-store' });
+                if (res.ok) break;
+                lastError = `HTTP ${res.status}`;
+              } catch (e) {
+                res = null;
+                lastError = `fetch error: ${e.message}`;
+              }
+              core.warning(`${attempt}/3 回目が失敗: ${lastError}`);
+              if (attempt < 3) await new Promise((r) => setTimeout(r, 30_000));
+            }
+            if (!res || !res.ok) {
+              await openIssueOnce(
+                '🚨 自動更新の配信先が読めない: /PROVision/updater/latest.json',
+                [
+                  '**latest.json が取得できません。**',
+                  '',
+                  `- URL: ${url}`,
+                  `- 直近のエラー: \`${lastError}\`（3 回試したあと）`,
+                  '',
+                  '## よくある原因',
+                  '- Settings → Pages → Source が「GitHub Actions」になっていない',
+                  '- deploy-pages.yml が失敗している',
+                  '- 復旧後: `gh workflow run deploy-pages.yml`',
+                  '',
+                  '_release-drift-check.yml が自動で起票しました。_',
+                ].join('\n'),
+              );
+              return;
+            }
+
+            const updaterVersion = String((await res.json()).version || '0.0.0');
+            const cmp = (a, b) => {
+              const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+              for (let i = 0; i < 3; i++) {
+                if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+              }
+              return 0;
+            };
+            if (cmp(updaterVersion, releaseVersion) >= 0) {
+              core.info(`OK: latest.json = ${updaterVersion}, 最新リリース = ${releaseVersion}`);
+              return;
+            }
+
+            await openIssueOnce(
+              `🚨 自動更新が追いついていない: latest.json (${updaterVersion}) < release (${releaseVersion})`,
+              [
+                '**配信中の latest.json が最新リリースより古いままです。**',
+                '',
+                `- 最新の安定版: \`${stable.tag_name}\`（${stable.html_url}）`,
+                `- 配信中の版: \`${updaterVersion}\` — ${url}`,
+                '',
+                '## よくある原因',
+                `- \`${stable.tag_name}\` の macOS ビルドが落ちて \`PROVision_aarch64.app.tar.gz\` が無い`,
+                '  （多くは Apple 公証 403 ＝ 規約の失効。https://developer.apple.com/account で同意）',
+                `- 復旧後: \`gh workflow run desktop-release.yml -f release_tag=${stable.tag_name}\``,
+                '',
+                '_release-drift-check.yml が自動で起票しました。_',
+              ].join('\n'),
+            );
