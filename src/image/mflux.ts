@@ -7,12 +7,12 @@
  *   - 生成は直列に捌く。並行させるとピークメモリで落ちる（この関数は待ち合わせる）
  */
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { sha256 } from '../prov/sha256.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -40,19 +40,16 @@ export interface GenerateResult {
  * 再実行しても同じ絵が出るはず、という前提と一致する。
  */
 export function cacheKeyOf(input: GenerateInput, model: string): string {
-  return createHash('sha256')
-    .update(
-      [
-        input.prompt,
-        String(input.seed),
-        String(input.width ?? 1024),
-        String(input.height ?? 1024),
-        String(input.steps ?? 8),
-        model,
-      ].join('\u0000'),
-    )
-    .digest('hex')
-    .slice(0, 32)
+  return sha256(
+    [
+      input.prompt,
+      String(input.seed),
+      String(input.width ?? 1024),
+      String(input.height ?? 1024),
+      String(input.steps ?? 8),
+      model,
+    ].join('\u0000'),
+  ).slice(0, 32)
 }
 
 /**

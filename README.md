@@ -47,8 +47,23 @@ pnpm tsx scripts/generate-lineage.ts
 生成は直列で 1 枚 2〜3 分。途中で落ちても `data/run/cache/` から続きを走る
 （キャッシュ鍵は prompt / seed / steps / サイズ / モデル＝再現に要る情報そのもの）。
 
+## 画面
+
+```bash
+pnpm dev   # http://localhost:5173
+```
+
+React Flow（`@xyflow/react`）＋ ELK layered。ノードを選ぶと右の面に出る:
+
+- **説明** — どの指示の連なりでこの版になったか（枝分かれした別案は入らない）
+- **再実行に要る情報** — prompt / model / seed / steps / サイズ
+- **この版が基づく外部データ** — 系譜をさかのぼって集めた参照 IRI
+
+画像ノードはサムネイルを必ず出す。中身が見えないと版を見分けられないため。
+参照の辺だけ点線にしてある——機械が消費したのではないから。
+
 書き出した JSON-LD は [prov-jsonld-viz](https://github.com/kumagallium/prov-jsonld-viz)
-にそのまま貼れば派生グラフとして描画される（実機で確認済み）。
+にそのまま貼っても描画される（実機で確認済み）。
 
 ## 横断クエリ（グラフでしかできないこと）
 
