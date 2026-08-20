@@ -39,7 +39,13 @@ pnpm typecheck   # tsc --noEmit
 
 # 動作確認用のサンプルグラフを書き出す
 pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
+
+# 実際に画像を生成しながら派生グラフを作る（mflux の量子化済み z-image-turbo が要る）
+pnpm tsx scripts/generate-lineage.ts
 ```
+
+生成は直列で 1 枚 2〜3 分。途中で落ちても `data/run/cache/` から続きを走る
+（キャッシュ鍵は prompt / seed / steps / サイズ / モデル＝再現に要る情報そのもの）。
 
 書き出した JSON-LD は [prov-jsonld-viz](https://github.com/kumagallium/prov-jsonld-viz)
 にそのまま貼れば派生グラフとして描画される（実機で確認済み）。
@@ -51,8 +57,7 @@ pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
 
 ```bash
 git clone https://github.com/kumagallium/asterism ~/develop/asterism
-pnpm tsx scripts/make-figure-lineage.ts
-./scripts/crossgraph-query.sh queries/figure-to-data.rq   # docker が要る
+./scripts/crossgraph-query.sh queries/figure-to-data.rq data/run/lineage   # docker が要る
 ```
 
 投稿版の図版 1 つを起点にすると、こう返る:
