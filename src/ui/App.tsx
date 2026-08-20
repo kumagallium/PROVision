@@ -11,11 +11,12 @@ import '@xyflow/react/dist/style.css'
 import { ProvGraph } from '../prov/graph.js'
 import { fromProvJsonLd, type ProvJsonLdDocument } from '../prov/jsonld.js'
 import { DEFAULT_BASE } from '../prov/iri.js'
-import { toFlow, type FlowNodeData } from './graph-adapter.js'
+import { toFlow } from './graph-adapter.js'
 import { layoutGraph } from './elk-layout.js'
 import { nodeTypes } from './nodes.js'
 import { EDGE_STYLE } from './palette.js'
-import { DetailPanel } from './detail-panel.js'
+import { HistoryPane } from './history-pane.js'
+import { ChatPane } from './chat-pane.js'
 
 /** ノードの実寸。カードの幅は固定なので、測らずに渡してよい */
 const SIZE: Record<string, { width: number; height: number }> = {
@@ -24,24 +25,27 @@ const SIZE: Record<string, { width: number; height: number }> = {
   external: { width: 200, height: 54 },
 }
 
-const GRAPH_URL = '/run/lineage.jsonld'
-
 export function App() {
   const [graph, setGraph] = useState<ProvGraph | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nodes, setNodes] = useState<Node[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
-  const [selected, setSelected] = useState<string | null>(null)
+  /** いま居る版。チャットはここから分岐する */
+  const [current, setCurrent] = useState<string | null>(null)
+
+  const applyDoc = useCallback((doc: ProvJsonLdDocument) => {
+    setGraph(fromProvJsonLd(doc, DEFAULT_BASE))
+  }, [])
 
   useEffect(() => {
-    fetch(GRAPH_URL)
+    fetch('/api/graph')
       .then(async (r) => {
-        if (!r.ok) throw new Error(`${GRAPH_URL} が読めない（${r.status}）`)
+        if (!r.ok) throw new Error(`グラフが読めない（${r.status}）`)
         return (await r.json()) as ProvJsonLdDocument
       })
-      .then((doc) => setGraph(fromProvJsonLd(doc, DEFAULT_BASE)))
+      .then(applyDoc)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
+  }, [applyDoc])
 
   const flow = useMemo(() => (graph ? toFlow(graph) : null), [graph])
 
@@ -56,6 +60,7 @@ export function App() {
       setNodes(
         flow.nodes.map((n) => ({
           ...n,
+          selected: n.id === current,
           position: positions.get(n.id) ?? n.position,
         })),
       )
@@ -64,7 +69,6 @@ export function App() {
           const style = EDGE_STYLE[e.data.kind]
           return {
             ...e,
-            animated: false,
             style: {
               stroke: style.stroke,
               strokeWidth: 1.5,
@@ -77,37 +81,45 @@ export function App() {
     return () => {
       cancelled = true
     }
-  }, [flow])
+  }, [flow, current])
 
-  const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
-    setSelected(node.id)
-  }, [])
+  const onNodeClick: NodeMouseHandler = useCallback(
+    (_, node) => {
+      // 生成ノードを選んだら、それが生んだ画像を「いま居る版」にする
+      if (node.type === 'activity') {
+        const activity = graph?.getActivity(node.id)
+        setCurrent(activity?.generated ?? null)
+      } else if (node.type === 'image') {
+        setCurrent(node.id)
+      }
+    },
+    [graph],
+  )
 
   if (error) {
     return (
       <div style={{ padding: 24, fontFamily: 'system-ui', color: '#a8513f' }}>
         <p>{error}</p>
         <p style={{ color: '#5c6b73' }}>
-          <code>pnpm tsx scripts/generate-lineage.ts</code> でグラフを作ってください。
+          <code>pnpm dev</code> でサーバごと起動してください。
         </p>
       </div>
     )
   }
 
-  const selectedData = nodes.find((n) => n.id === selected)?.data as
-    | FlowNodeData
-    | undefined
-
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 380px',
+        gridTemplateColumns: '240px 1fr 400px',
         height: '100vh',
         fontFamily: 'system-ui, sans-serif',
+        background: '#fbfcfc',
       }}
     >
-      <div style={{ minWidth: 0 }}>
+      <HistoryPane graph={graph} current={current} onSelect={setCurrent} />
+
+      <div style={{ minWidth: 0, borderLeft: '1px solid #e0e5e8' }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -121,7 +133,8 @@ export function App() {
           <Controls />
         </ReactFlow>
       </div>
-      <DetailPanel graph={graph} data={selectedData} />
+
+      <ChatPane graph={graph} current={current} onGraph={applyDoc} onSelect={setCurrent} />
     </div>
   )
 }

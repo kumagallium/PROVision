@@ -8,23 +8,35 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev": "vite",
+    "dev": "concurrently -n web,api -c cyan,magenta \"vite\" \"pnpm dev:server\"",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:web": "vite",
+    "dev:server": "tsx watch src/server/index.ts",
+    "build:web": "vite build",
+    "tauri": "tauri"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
+    "concurrently": "^10.0.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-http": "^2.5.9",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@xyflow/react": "^12.11.3",
     "elkjs": "^0.12.0",
+    "hono": "^4.13.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

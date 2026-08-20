@@ -37,13 +37,15 @@ export interface FlowEdge {
 }
 
 /**
- * Entity の location（data/run/images/xxx.png）を、
- * vite が配信する URL（/run/images/xxx.png）に直す。
+ * Entity の location を、サーバが配る URL に直す。
+ *
+ * location は記録した時期によって `images/x.png` だったり
+ * `data/run/images/x.png` だったりする。ファイル名だけ見れば足りる。
  */
 export function imageUrlOf(entity: ImageEntity): string | undefined {
   if (!entity.location) return undefined
-  const normalized = entity.location.replace(/^\.?\//, '')
-  return `/${normalized.replace(/^data\//, '')}`
+  const name = entity.location.split('/').pop()
+  return name ? `/api/images/${name}` : undefined
 }
 
 export function toFlow(graph: ProvGraph): { nodes: FlowNode[]; edges: FlowEdge[] } {

@@ -92,6 +92,6 @@ describe('React Flow への写し取り', () => {
         mediaType: 'image/png',
         location: 'data/run/images/aaa.png',
       }),
-    ).toBe('/run/images/aaa.png')
+    ).toBe('/api/images/aaa.png')
   })
 })
