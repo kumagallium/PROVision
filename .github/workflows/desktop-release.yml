@@ -19,9 +19,6 @@ permissions:
   # ビルドが静かに失敗して「更新されない」で気づく事故を防ぐため、失敗時に Issue を起票する
   issues: write
 
-env:
-  MAC_BUNDLE: PROVision_aarch64.app.tar.gz
-
 jobs:
   resolve-release:
     runs-on: ubuntu-latest
@@ -145,10 +142,19 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ needs.resolve-release.outputs.tag }}"
+          VERSION="${TAG#v}"
+          # バンドル名にはバージョンが入る（tauri-action の命名）。
+          # 固定名で待つと "no assets match the file pattern" で落ちる（v0.1.0 で踏んだ）
+          BUNDLE="PROVision_${VERSION}_aarch64.app.tar.gz"
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+
           mkdir -p /tmp/assets
-          gh release download "$TAG" --pattern "$MAC_BUNDLE" --dir /tmp/assets \
+          gh release download "$TAG" --pattern "$BUNDLE" --dir /tmp/assets \
             --repo "${{ github.repository }}" --clobber
-          tauri signer sign "/tmp/assets/$MAC_BUNDLE" -k "$TAURI_SIGNING_PRIVATE_KEY" -p ""
+          # tauri-action が既に署名を上げていればそれを使う。無ければここで署名する
+          gh release download "$TAG" --pattern "${BUNDLE}.sig" --dir /tmp/assets \
+            --repo "${{ github.repository }}" --clobber 2>/dev/null \
+            || tauri signer sign "/tmp/assets/$BUNDLE" -k "$TAURI_SIGNING_PRIVATE_KEY" -p ""
           ls -la /tmp/assets/
 
       - name: Build and verify latest.json
@@ -156,12 +162,12 @@ jobs:
           set -euo pipefail
           TAG="${{ needs.resolve-release.outputs.tag }}"
           VERSION="${TAG#v}"
-          SIG_FILE="/tmp/assets/${MAC_BUNDLE}.sig"
+          SIG_FILE="/tmp/assets/${BUNDLE}.sig"
 
           # 署名が無い＝バンドルが欠けたか署名に失敗した。壊れた案内（署名空・URL 無し）
           # を配ると、クライアントは以後更新できなくなる。ここで必ず止める
           if [ ! -s "$SIG_FILE" ]; then
-            echo "::error::${MAC_BUNDLE} の署名が無い。latest.json は publish しない"
+            echo "::error::${BUNDLE} の署名が無い。latest.json は publish しない"
             exit 1
           fi
 
@@ -169,7 +175,7 @@ jobs:
             --arg v "$VERSION" \
             --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg sig "$(cat "$SIG_FILE")" \
-            --arg url "https://github.com/${{ github.repository }}/releases/download/${TAG}/${MAC_BUNDLE}" \
+            --arg url "https://github.com/${{ github.repository }}/releases/download/${TAG}/${BUNDLE}" \
             '{version: $v, notes: "変更点は CHANGELOG を参照", pub_date: $d,
               platforms: {"darwin-aarch64": {signature: $sig, url: $url}}}' \
             > /tmp/latest.json
@@ -183,6 +189,9 @@ jobs:
             exit 1
           fi
 
+      # tauri-action も latest.json を上げてくる（includeUpdaterJson: false でも）。
+      # その中身は api.github.com のアセット URL を指していて素直に辿れないので、
+      # こちらで作ったもので必ず上書きする
       - name: Upload latest.json to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
