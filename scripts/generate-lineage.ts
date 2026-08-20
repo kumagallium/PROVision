@@ -21,7 +21,7 @@ import {
   modelIdOf,
   resolveImageCommand,
 } from '../src/image/mflux.js'
-import { sha256 } from '../src/prov/iri.js'
+import { imageContentDigest } from '../src/image/png.js'
 
 const ASTERISM = 'https://kumagallium.github.io/asterism/starrydata/resource'
 const ZT_CURVE = `${ASTERISM}/curve/1171-318-665`
@@ -147,13 +147,13 @@ for (const [index, spec] of STEPS.entries()) {
   const result = await generateOrReuse({ prompt: spec.prompt, seed: spec.seed })
 
   // 画像の置き場所は内容ハッシュで決まる。Entity の IRI と同じ由来にしておく
-  const digest = sha256(result.png)
+  const digest = imageContentDigest(result.png)
   const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
   await writeFile(path, result.png)
 
   const entity = graph.recordGeneration({
     location: path,
-    image: result.png,
+    image: { digest },
     label: spec.label,
     prompt: spec.prompt,
     model: result.model,
