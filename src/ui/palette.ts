@@ -15,4 +15,6 @@ export const EDGE_STYLE = {
   referenced: { stroke: '#c08b3e', dash: '6 4' },
   /** 生成した */
   generated: { stroke: '#5b8fb9', dash: undefined },
+  /** 同じ指定で出し直したら別の絵になった（prov:alternateOf）。派生ではない */
+  alternate: { stroke: '#a8513f', dash: '2 4' },
 } as const

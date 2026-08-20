@@ -46,6 +46,7 @@ export function toNTriples(graph: ProvGraph): string[] {
     triple(s, iri(`${PROVISION}imageDigest`), literal(e.digest))
     triple(s, iri(`${PROVISION}mediaType`), literal(e.mediaType))
     if (e.location) triple(s, iri(`${PROV}atLocation`), literal(e.location))
+    if (e.alternateOf) triple(s, iri(`${PROV}alternateOf`), iri(e.alternateOf))
 
     const act = graph.activityThatGenerated(e.id)
     if (act) {
@@ -106,6 +107,7 @@ export function toNTriples(graph: ProvGraph): string[] {
     for (const agent of a.wasAssociatedWith) {
       triple(s, iri(`${PROV}wasAssociatedWith`), iri(agent))
     }
+    if (a.title) triple(s, iri(`${PROVISION}title`), literal(a.title))
     if (a.figure) {
       const f = iri(a.figure.id)
       triple(f, iri(`${RDF}type`), iri(`${PROV}Entity`))
@@ -117,6 +119,13 @@ export function toNTriples(graph: ProvGraph): string[] {
       // 載った図版は、その版の画像から出てきたもの。ここは派生で正しい
       triple(f, iri(`${PROV}wasDerivedFrom`), iri(a.about))
     }
+  }
+
+  // いま有効な表示名だけ、会話の根に素の dcterms:title として置く。
+  // 付け直した履歴は表明 Activity 側に残るので、失われない
+  for (const root of graph.roots()) {
+    const title = graph.titleOf(root.id)
+    if (title) triple(iri(root.id), iri(`${DCTERMS}title`), literal(title))
   }
 
   return [...new Set(out)].sort()

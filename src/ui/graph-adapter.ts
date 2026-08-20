@@ -33,7 +33,7 @@ export interface FlowEdge {
   source: string
   target: string
   /** 生成の辺か、人間が参照した辺か。見た目を変える */
-  data: { kind: 'used' | 'referenced' | 'generated' }
+  data: { kind: 'used' | 'referenced' | 'generated' | 'alternate' }
 }
 
 /**
@@ -80,6 +80,18 @@ export function toFlow(
         ...(imageUrlOf(entity) ? { imageUrl: imageUrlOf(entity) } : {}),
       },
     })
+  }
+
+  // 出し直して食い違った版は、元の版と線で結ぶ。派生ではないので見た目を変える
+  for (const entity of entities) {
+    if (entity.alternateOf && inScope.has(entity.alternateOf)) {
+      edges.push({
+        id: `${entity.alternateOf}~${entity.id}`,
+        source: entity.alternateOf,
+        target: entity.id,
+        data: { kind: 'alternate' },
+      })
+    }
   }
 
   const externals = new Set<Iri>()

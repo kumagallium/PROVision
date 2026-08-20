@@ -121,10 +121,102 @@ describe('後から表明したこと', () => {
     expect(restored.publicationsOf(v2.id)[0]?.partOf).toBe(DOI)
   })
 
+  it('改名しても、最初に打った指示は残る', () => {
+    const { g, v1 } = graphWithTwoVersions()
+    const firstIntent = g.activityThatGenerated(v1.id)!.label
+
+    g.assertTitle({ root: v1.id, title: 'Asterism のロゴ', at: '2026-08-21T09:00:00Z' })
+    expect(g.titleOf(v1.id)).toBe('Asterism のロゴ')
+    // 生成の記録は変わらない
+    expect(g.activityThatGenerated(v1.id)!.label).toBe(firstIntent)
+
+    // 付け直すと新しいほうが効き、履歴は両方残る
+    g.assertTitle({ root: v1.id, title: '星座ロゴ', at: '2026-08-21T10:00:00Z' })
+    expect(g.titleOf(v1.id)).toBe('星座ロゴ')
+    expect(g.listAssertions().filter((a) => a.kind === 'title')).toHaveLength(2)
+  })
+
+  it('会話を消すと、その会話のものだけが消える', () => {
+    const { g, v1, v2 } = graphWithTwoVersions()
+    g.assertReference({ about: v1.id, referenced: [CURVE], at: '2026-08-21T09:00:00Z' })
+
+    // 別の会話を足しておく
+    const other = g.recordGeneration({
+      image: bytes('other'),
+      label: '別の会話',
+      prompt: 'p2',
+      model: 'm',
+      seed: 9,
+      startedAtTime: '2026-08-20T12:00:00Z',
+      endedAtTime: '2026-08-20T12:00:10Z',
+    })
+
+    const { removedImages } = g.deleteSession(v1.id)
+    expect(removedImages).toEqual([])
+    expect(g.getEntity(v1.id)).toBeUndefined()
+    expect(g.getEntity(v2.id)).toBeUndefined()
+    expect(g.listAssertions()).toHaveLength(0)
+    // 別の会話は無傷
+    expect(g.getEntity(other.id)).toBeDefined()
+    expect(g.roots()).toHaveLength(1)
+  })
+
+  it('消した会話の画像は、消す対象として返る', () => {
+    const g = new ProvGraph()
+    const e = g.recordGeneration({
+      image: bytes('x'),
+      label: 'x',
+      location: 'images/abc.png',
+      prompt: 'p',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:10Z',
+    })
+    expect(g.deleteSession(e.id).removedImages).toEqual(['images/abc.png'])
+  })
+
+  it('JSON-LD を往復しても表示名が保たれる', () => {
+    const { g, v1 } = graphWithTwoVersions()
+    g.assertTitle({ root: v1.id, title: 'Asterism のロゴ', at: '2026-08-21T09:00:00Z' })
+    const restored = fromProvJsonLd(toProvJsonLd(g), DEFAULT_BASE)
+    expect(restored.toData()).toEqual(g.toData())
+    expect(restored.titleOf(v1.id)).toBe('Asterism のロゴ')
+  })
+
   it('グラフに無い版には表明できない', () => {
     const { g } = graphWithTwoVersions()
     expect(() =>
       g.assertReference({ about: 'https://example.org/x', referenced: [CURVE], at: 'now' }),
     ).toThrow(/その版がグラフに無い/)
+  })
+})
+
+describe('出し直して食い違ったとき', () => {
+  it('派生ではなく alternateOf で繋ぎ、同じ会話に留まる', () => {
+    const g = new ProvGraph()
+    const common = {
+      prompt: 'p',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:10Z',
+    }
+    const first = g.recordGeneration({ ...common, image: bytes('a'), label: '初回' })
+    const again = g.recordGeneration({
+      ...common,
+      image: bytes('b'),
+      label: '再実行（食い違い）',
+      startedAtTime: '2026-08-20T11:00:00Z',
+      endedAtTime: '2026-08-20T11:00:10Z',
+      alternateOf: first.id,
+    })
+
+    // 会話は 1 つのまま
+    expect(g.roots()).toHaveLength(1)
+    expect(g.rootOf(again.id)).toBe(first.id)
+    // 派生の辺は張らない（前の絵を材料にしたわけではない）
+    expect(g.activityThatGenerated(again.id)!.used).toEqual([])
+    expect(toNTriples(g).some((l) => l.includes('#alternateOf'))).toBe(true)
   })
 })

@@ -4,7 +4,10 @@
  * 会話は別の語彙で持たない。**根（親を持たない生成）ごとの連結成分がそのまま 1 つの会話**で、
  * グラフから導ける。別に持つと、グラフと食い違ったときにどちらが本当か分からなくなる。
  */
+import { useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
+import type { ProvJsonLdDocument } from '../prov/jsonld.js'
+import { apiFetch } from './api-base.js'
 import { imageUrlOf } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
 import { ProvImage } from './prov-image.js'
@@ -16,6 +19,8 @@ export function SessionPane({
   onNew,
   onOpenSettings,
   updateAvailable,
+  onGraph,
+  onDeleted,
 }: {
   graph: ProvGraph | null
   currentRoot: string | undefined
@@ -24,7 +29,40 @@ export function SessionPane({
   onNew: () => void
   onOpenSettings: () => void
   updateAvailable: boolean
+  onGraph: (doc: ProvJsonLdDocument) => void
+  /** 開いている会話が消えたら、選択を外してもらう */
+  onDeleted: () => void
 }) {
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+
+  async function rename(root: string) {
+    const title = draft.trim()
+    setRenaming(null)
+    if (!title) return
+    const res = await apiFetch('api/session/title', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root, title }),
+    })
+    const json = (await res.json()) as { graph?: ProvJsonLdDocument }
+    if (json.graph) onGraph(json.graph)
+  }
+
+  async function remove(root: string, title: string) {
+    if (!window.confirm(`「${title}」を消します。画像もまとめて消えます。戻せません。`)) return
+    const res = await apiFetch('api/session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root }),
+    })
+    const json = (await res.json()) as { graph?: ProvJsonLdDocument }
+    if (json.graph) {
+      onGraph(json.graph)
+      onDeleted()
+    }
+  }
+
   const sessions = graph
     ? graph
         .roots()
@@ -35,7 +73,9 @@ export function SessionPane({
           const lastAt = last
             ? (graph.activityThatGenerated(last.id)?.startedAtTime ?? '')
             : ''
-          return { root, versions, title: first?.label ?? root.label, lastAt, last }
+          // 表示名を付けていればそれを使う。無ければ最初の指示（＝実際に打った文）
+          const title = graph.titleOf(root.id) ?? first?.label ?? root.label
+          return { root, versions, title, lastAt, last }
         })
         // 新しい会話が上
         .sort((a, b) => b.lastAt.localeCompare(a.lastAt))
@@ -109,9 +149,34 @@ export function SessionPane({
 
         {sessions.map(({ root, versions, title, lastAt, last }) => {
           const selected = root.id === currentRoot
+          if (renaming === root.id) {
+            return (
+              <input
+                key={root.id}
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => void rename(root.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void rename(root.id)
+                  if (e.key === 'Escape') setRenaming(null)
+                }}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  border: `1.5px solid ${PALETTE.activity.main}`,
+                  borderRadius: 8,
+                  padding: '8px 7px',
+                  font: 'inherit',
+                  fontSize: 12.5,
+                  marginBottom: 3,
+                }}
+              />
+            )
+          }
           return (
+            <div key={root.id} style={{ position: 'relative' }}>
             <button
-              key={root.id}
               type="button"
               onClick={() => onOpen(last?.id ?? root.id)}
               style={{
@@ -155,9 +220,48 @@ export function SessionPane({
                 </span>
               </span>
             </button>
+            {selected ? (
+              <span
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  bottom: 6,
+                  display: 'flex',
+                  gap: 8,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(title)
+                    setRenaming(root.id)
+                  }}
+                  style={ROW_ACTION}
+                >
+                  改名
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void remove(root.id, title)}
+                  style={{ ...ROW_ACTION, color: '#a8513f' }}
+                >
+                  削除
+                </button>
+              </span>
+            ) : null}
+            </div>
           )
         })}
       </div>
     </aside>
   )
+}
+
+const ROW_ACTION: React.CSSProperties = {
+  border: 'none',
+  background: 'none',
+  padding: 0,
+  fontSize: 10.5,
+  color: '#7b8892',
+  cursor: 'pointer',
 }

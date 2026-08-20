@@ -40,7 +40,13 @@ export class ImmutabilityError extends Error {
 
 /** 1 回の生成を記録するための入力。IRI は呼び出し側が知らなくてよい。 */
 export interface RecordGenerationInput {
-  /** 生成された画像のバイト列、または既に取った SHA-256（hex） */
+  /**
+   * 画像の**内容**のハッシュ、またはバイト列。
+   *
+   * PNG を扱うなら `imageContentDigest()` で取った値を渡すこと。
+   * バイト列をそのまま渡すとファイル全体を数えるので、mflux が書く
+   * 生成時刻のメタデータで、同じ絵でも毎回別の Entity になる（実測で踏んだ）。
+   */
   image: Uint8Array | { digest: string }
   label: string
   mediaType?: string
@@ -62,6 +68,8 @@ export interface RecordGenerationInput {
 
   /** 派生元の画像 Entity の IRI。空なら根 */
   derivedFrom?: Iri[]
+  /** 同じ指定で出し直して食い違ったときの相手（prov:alternateOf） */
+  alternateOf?: Iri
   /** 人間が参照した外部リソースの IRI（asterism の curve / sample など） */
   referenced?: Iri[]
   agents?: Iri[]
@@ -159,6 +167,7 @@ export class ProvGraph {
       digest,
       mediaType: input.mediaType ?? 'image/png',
       ...(input.location ? { location: input.location } : {}),
+      ...(input.alternateOf ? { alternateOf: input.alternateOf } : {}),
     }
 
     const existing = this.entities.get(entityId)
@@ -231,6 +240,8 @@ export class ProvGraph {
       .filter((a) => a.used.length === 0)
       .map((a) => this.entities.get(a.generated))
       .filter((e): e is ImageEntity => e !== undefined)
+      // 出し直して食い違った版は、元の版と同じ会話に属する。会話の根ではない
+      .filter((e) => !(e.alternateOf && this.entities.has(e.alternateOf)))
   }
 
   /** その画像が属する会話の根 */
@@ -241,7 +252,15 @@ export class ProvGraph {
       seen.add(current)
       const act = this.activityThatGenerated(current)
       if (!act) return this.entities.has(current) ? current : undefined
-      if (act.used.length === 0) return current
+      if (act.used.length === 0) {
+        // 出し直して食い違った版は、元の版と同じ会話に属する
+        const alternate: Iri | undefined = this.entities.get(current)?.alternateOf
+        if (alternate && this.entities.has(alternate)) {
+          current = alternate
+          continue
+        }
+        return current
+      }
       current = act.used[0]
     }
     return undefined
@@ -325,6 +344,74 @@ export class ProvGraph {
     }
     this.assertions.set(id, assertion)
     return assertion
+  }
+
+  /**
+   * 会話に表示名を付ける。
+   *
+   * **最初の指示は書き換えない。** 「何と打って始めたか」は生成の記録として残し、
+   * 「こう呼ぶことにした」は別の表明として足す（D-008）。付け直した履歴も残る。
+   */
+  assertTitle(input: {
+    root: Iri
+    title: string
+    at: string
+    agents?: Iri[]
+  }): AssertionActivity {
+    if (!this.entities.has(input.root)) {
+      throw new Error(`その会話がグラフに無い: ${input.root}`)
+    }
+    const title = input.title.trim()
+    if (!title) throw new Error('表示名が空です')
+
+    const id = assertionIri(this.base, `title ${input.root} ${title} ${input.at}`)
+    const assertion: AssertionActivity = {
+      id,
+      kind: 'title',
+      label: `表示名の変更（${title}）`,
+      about: input.root,
+      referenced: [],
+      title,
+      startedAtTime: input.at,
+      wasAssociatedWith: [...(input.agents ?? [])].sort(),
+    }
+    this.assertions.set(id, assertion)
+    return assertion
+  }
+
+  /** 会話の表示名。付けていなければ undefined（呼び側が最初の指示に落とす） */
+  titleOf(root: Iri): string | undefined {
+    const latest = this.listAssertions()
+      .filter((a) => a.kind === 'title' && a.about === root && a.title)
+      .sort((a, b) => a.startedAtTime.localeCompare(b.startedAtTime))
+      .pop()
+    return latest?.title
+  }
+
+  /**
+   * 会話をまるごと消す。**これは記録の書き換えではなく、記録そのものの破棄。**
+   * 消したことは残らない——残す意味があるなら消してはいけない、という立場を取る。
+   *
+   * 返り値は、もうどこからも参照されなくなった画像の置き場所。
+   * ファイルの削除は呼び側（サーバ）がやる。
+   */
+  deleteSession(root: Iri): { removedImages: string[] } {
+    const doomed = new Set(this.session(root).map((e) => e.id))
+    if (doomed.size === 0) throw new Error(`その会話がグラフに無い: ${root}`)
+
+    const removedImages: string[] = []
+    for (const id of doomed) {
+      const location = this.entities.get(id)?.location
+      if (location) removedImages.push(location)
+      this.entities.delete(id)
+    }
+    for (const [id, act] of [...this.activities]) {
+      if (doomed.has(act.generated)) this.activities.delete(id)
+    }
+    for (const [id, a] of [...this.assertions]) {
+      if (doomed.has(a.about)) this.assertions.delete(id)
+    }
+    return { removedImages }
   }
 
   /**

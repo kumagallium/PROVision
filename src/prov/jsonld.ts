@@ -87,6 +87,7 @@ function entityNode(e: ImageEntity, derivedFrom: string[], generatedBy?: string)
     'provision:imageDigest': lit(e.digest),
     'provision:mediaType': lit(e.mediaType),
     ...(e.location ? { atLocation: lit(e.location) } : {}),
+    ...(e.alternateOf ? { alternateOf: refs([e.alternateOf]) } : {}),
     ...(derivedFrom.length > 0 ? { wasDerivedFrom: refs(derivedFrom) } : {}),
     ...(generatedBy ? { wasGeneratedBy: refs([generatedBy]) } : {}),
   }
@@ -166,6 +167,7 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
       'provision:assertionAbout': refs([a.about]) as unknown as JsonValue,
       startedAtTime: lit(a.startedAtTime, `${XSD}dateTime`),
       used: refs([a.about, ...a.referenced]),
+      ...(a.title ? { 'provision:title': lit(a.title) } : {}),
       ...(a.wasAssociatedWith.length > 0
         ? { wasAssociatedWith: refs(a.wasAssociatedWith) }
         : {}),
@@ -256,6 +258,9 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         ...(firstValue(n, 'atLocation') !== undefined
           ? { location: String(firstValue(n, 'atLocation')) }
           : {}),
+        ...(idList(n, 'alternateOf')[0] !== undefined
+          ? { alternateOf: idList(n, 'alternateOf')[0]! }
+          : {}),
       })
     } else if (t === 'SoftwareAgent' || t === 'Person' || t === 'Organization') {
       agents.push({ id, label: String(firstValue(n, 'label') ?? id), kind: t })
@@ -298,13 +303,20 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         .filter((iri) => iri !== about)
         .sort()
       const figure = figureByActivity.get(id)
+      const title = firstValue(n, 'provision:title')
+      const kind: AssertionActivity['kind'] = figure
+        ? 'publication'
+        : title !== undefined
+          ? 'title'
+          : 'reference'
       return {
         id,
-        kind: (figure ? 'publication' : 'reference') as AssertionActivity['kind'],
+        kind,
         label: String(firstValue(n, 'label') ?? id),
         about,
         referenced,
         ...(figure ? { figure } : {}),
+        ...(title !== undefined ? { title: String(title) } : {}),
         startedAtTime: String(firstValue(n, 'startedAtTime') ?? ''),
         wasAssociatedWith: idList(n, 'wasAssociatedWith').slice().sort(),
       }

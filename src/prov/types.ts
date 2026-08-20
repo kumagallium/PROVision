@@ -17,6 +17,13 @@ export interface ImageEntity {
   mediaType: string
   /** 画像の実体の場所。ファイルパスまたは URL */
   location?: string
+  /**
+   * 同じ指定で出し直したら別の絵になった、というときの相手（`prov:alternateOf`）。
+   *
+   * 派生ではない——前の絵を材料にしたわけではないので `wasDerivedFrom` は嘘になる。
+   * PROV に「同じものを指す別の実体」を表す語があるので、それを使う。
+   */
+  alternateOf?: Iri
 }
 
 /** 再実行に要る情報。1 つでも欠けたら記録を拒否する（D-002）。 */
@@ -65,8 +72,12 @@ export interface GenerationActivity extends ReproducibleSpec {
  */
 export interface AssertionActivity {
   id: Iri
-  /** reference: このデータに基づく / publication: この figure として載った */
-  kind: 'reference' | 'publication'
+  /**
+   * reference: このデータに基づく
+   * publication: この figure として載った
+   * title: この会話をこう呼ぶことにした
+   */
+  kind: 'reference' | 'publication' | 'title'
   label: string
   /** 何についての表明か。画像 Entity の IRI */
   about: Iri
@@ -74,6 +85,8 @@ export interface AssertionActivity {
   referenced: Iri[]
   /** kind === 'publication' のとき。載った先 */
   figure?: PublishedFigure
+  /** kind === 'title' のとき。会話の表示名 */
+  title?: string
   startedAtTime: string
   wasAssociatedWith: Iri[]
 }

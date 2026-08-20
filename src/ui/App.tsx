@@ -65,8 +65,13 @@ export function App() {
     [graph, current],
   )
 
+  /**
+   * 真ん中の面は**その会話だけ**を描く。会話を選んでいないときは何も描かない。
+   * 全部を一度に出すと、別々の話が 1 枚の絵に混ざって読めなくなる。
+   */
   const flow = useMemo(
-    () => (graph ? toFlow(graph, currentRoot) : null),
+    () =>
+      graph && currentRoot ? toFlow(graph, currentRoot) : { nodes: [], edges: [] },
     [graph, currentRoot],
   )
 
@@ -98,10 +103,26 @@ export function App() {
         onNew={() => setCurrent(null)}
         onOpenSettings={() => setSettingsOpen(true)}
         updateAvailable={update !== null}
+        onGraph={applyDoc}
+        onDeleted={() => setCurrent(null)}
       />
 
       <ReactFlowProvider>
-        <GraphPane flow={flow} current={current} onSelect={setCurrent} />
+        {currentRoot ? (
+          <GraphPane flow={flow} current={current} onSelect={setCurrent} />
+        ) : (
+          <div
+            style={{
+              borderLeft: '1px solid #e0e5e8',
+              display: 'grid',
+              placeItems: 'center',
+              color: '#8b98a1',
+              fontSize: 13,
+            }}
+          >
+            左から会話を選ぶと、その会話の来歴が出ます。
+          </div>
+        )}
       </ReactFlowProvider>
 
       <ChatPane graph={graph} current={current} onGraph={applyDoc} onSelect={setCurrent} />

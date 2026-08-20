@@ -56,6 +56,7 @@ export function AssertPanel({
   const [partOf, setPartOf] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rerun, setRerun] = useState<'idle' | 'running' | 'match' | 'differ'>('idle')
 
   if (!graph) return null
   const existing = graph.referencesOf(entityId)
@@ -82,8 +83,56 @@ export function AssertPanel({
     }
   }
 
+  async function runRerun() {
+    setRerun('running')
+    setError(null)
+    try {
+      const res = await apiFetch('api/rerun', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity: entityId }),
+      })
+      const json = (await res.json()) as {
+        match?: boolean
+        graph?: ProvJsonLdDocument
+        error?: string
+      }
+      if (!res.ok || json.error) throw new Error(json.error ?? `失敗（${res.status}）`)
+      if (json.graph) onGraph(json.graph)
+      setRerun(json.match ? 'match' : 'differ')
+    } catch (e: unknown) {
+      setRerun('idle')
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   return (
     <div>
+      <h3 style={H}>再実行</h3>
+      <p style={{ fontSize: 11, color: '#7b8892', margin: '0 0 6px' }}>
+        記録どおりの prompt / model / seed でもう一度出して、
+        <strong>同じ絵になるかを実際に確かめます</strong>。
+        一致すればこの版に生成が 1 本増え、食い違えば別の版として残ります。
+      </p>
+      <button
+        type="button"
+        disabled={busy || rerun === 'running'}
+        onClick={() => void runRerun()}
+        style={SMALL_BUTTON(PALETTE.activity.main)}
+      >
+        {rerun === 'running' ? '再実行中… 2〜3 分' : 'この版を再実行'}
+      </button>
+      {rerun === 'match' ? (
+        <p style={{ fontSize: 11.5, color: PALETTE.image.text, marginTop: 6 }}>
+          同じ絵が出ました。この版は再現できます。
+        </p>
+      ) : null}
+      {rerun === 'differ' ? (
+        <p style={{ fontSize: 11.5, color: '#a8513f', marginTop: 6 }}>
+          違う絵が出ました。別の版として記録しています（隠しません）。
+        </p>
+      ) : null}
+
       <h3 style={H}>基づく外部データ</h3>
       <p style={{ fontSize: 11, color: '#7b8892', margin: '0 0 6px' }}>
         著者がこれを見てこの図を作った、という記録。asterism 側と繋ぐと、試料・論文・

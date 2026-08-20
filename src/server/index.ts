@@ -8,7 +8,7 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ProvGraph } from '../prov/graph.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
@@ -16,6 +16,7 @@ import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
 import { cacheKeyOf, generateImage, modelIdOf, resolveImageCommand } from '../image/mflux.js'
+import { imageContentDigest } from '../image/png.js'
 
 const DATA_DIR = resolve(process.env.PROVISION_DATA_DIR ?? 'data/run')
 const IMAGE_DIR = join(DATA_DIR, 'images')
@@ -184,6 +185,100 @@ app.post('/api/publication', async (c) => {
   }
 })
 
+/** 会話に表示名を付ける。最初の指示は書き換えない（D-008） */
+app.post('/api/session/title', async (c) => {
+  const body = (await c.req.json()) as { root?: string; title?: string }
+  try {
+    graph.assertTitle({
+      root: String(body.root ?? ''),
+      title: String(body.title ?? ''),
+      at: new Date().toISOString(),
+      agents: [(await personAgent()).id],
+    })
+    await persist()
+    return c.json({ graph: toProvJsonLd(graph) })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+/** 会話をまるごと消す。画像のファイルも消す */
+app.delete('/api/session', async (c) => {
+  const body = (await c.req.json()) as { root?: string }
+  try {
+    const { removedImages } = graph.deleteSession(String(body.root ?? ''))
+    for (const location of removedImages) {
+      const name = location.split('/').pop()
+      // ファイル名しか使わない。data の外は触らない
+      if (name && /^[0-9a-f]{8,64}\.png$/.test(name)) {
+        await rm(join(IMAGE_DIR, name), { force: true })
+      }
+    }
+    await persist()
+    return c.json({ graph: toProvJsonLd(graph), removed: removedImages.length })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+/**
+ * その版をもう一度出す。**「再実行できる」という主張を実際に検査する。**
+ *
+ * 記録どおりの prompt / model / seed / steps / サイズで走らせ、
+ * 出てきた絵の内容ハッシュが元と一致するかを見る。
+ * 一致すれば同じ Entity に生成が 1 本増える（再現できた証拠が残る）。
+ * 食い違えば別の Entity ができる——そのことも隠さず記録する。
+ */
+app.post('/api/rerun', async (c) => {
+  const body = (await c.req.json()) as { entity?: string }
+  const target = String(body.entity ?? '')
+  const original = graph.activityThatGenerated(target)
+  if (!original) return c.json({ error: `その版がグラフに無い: ${target}` }, 400)
+
+  try {
+    const result = await serial(async () => {
+      const generated = await generateImage({
+        prompt: original.prompt,
+        seed: original.seed,
+        ...(original.width !== undefined ? { width: original.width } : {}),
+        ...(original.height !== undefined ? { height: original.height } : {}),
+        ...(original.steps !== undefined ? { steps: original.steps } : {}),
+      })
+      const digest = imageContentDigest(generated.png)
+      const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
+      await writeFile(path, generated.png)
+
+      const match = digest === graph.getEntity(target)?.digest
+      const entity = graph.recordGeneration({
+        image: { digest },
+        label: match ? original.label : `${original.label}（再実行で食い違った）`,
+        location: `images/${digest.slice(0, 16)}.png`,
+        prompt: original.prompt,
+        model: generated.model,
+        provider: generated.provider,
+        seed: original.seed,
+        ...(original.steps !== undefined ? { steps: original.steps } : {}),
+        ...(original.width !== undefined ? { width: original.width } : {}),
+        ...(original.height !== undefined ? { height: original.height } : {}),
+        startedAtTime: generated.startedAtTime,
+        endedAtTime: generated.endedAtTime,
+        intent: match ? '再実行（一致）' : '再実行（食い違い）',
+        ...(original.used.length > 0 ? { derivedFrom: original.used } : {}),
+        // 前の絵を材料にしたわけではないので派生ではない。同じものを指す別の実体
+        ...(match ? {} : { alternateOf: target }),
+        ...(original.referenced.length > 0 ? { referenced: original.referenced } : {}),
+        agents: [tool.id, (await personAgent()).id],
+      })
+      await persist()
+      return { match, entity }
+    })
+
+    return c.json({ ...result, graph: toProvJsonLd(graph) })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+  }
+})
+
 app.post('/api/generate', async (c) => {
   const body = (await c.req.json()) as GenerateBody
   if (!body.intent?.trim() && !body.prompt?.trim()) {
@@ -240,7 +335,8 @@ app.post('/api/generate', async (c) => {
         )
       }
 
-      const digest = sha256(result.png)
+      // 絵の内容だけを数える。PNG のファイル全体だと生成時刻で毎回変わる
+      const digest = imageContentDigest(result.png)
       const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
       await writeFile(path, result.png)
 
