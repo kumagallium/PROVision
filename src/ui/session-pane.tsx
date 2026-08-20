@@ -15,6 +15,7 @@ export function SessionPane({
   onOpen,
   onNew,
   onOpenSettings,
+  updateAvailable,
 }: {
   graph: ProvGraph | null
   currentRoot: string | undefined
@@ -22,6 +23,7 @@ export function SessionPane({
   onOpen: (entityId: string) => void
   onNew: () => void
   onOpenSettings: () => void
+  updateAvailable: boolean
 }) {
   const sessions = graph
     ? graph
@@ -64,6 +66,21 @@ export function SessionPane({
           }}
         >
           ⚙ 設定
+          {updateAvailable ? (
+            <span
+              title="新しいバージョンがあります"
+              style={{
+                marginLeft: 5,
+                padding: '1px 6px',
+                borderRadius: 999,
+                background: PALETTE.activity.main,
+                color: '#fff',
+                fontSize: 10,
+              }}
+            >
+              更新あり
+            </span>
+          ) : null}
         </button>
         <button
           type="button"

@@ -10,6 +10,7 @@ import { SessionPane } from './session-pane.js'
 import { ChatPane } from './chat-pane.js'
 import { apiFetch, ensureSidecar, isTauri } from './api-base.js'
 import { SettingsDialog } from './settings-dialog.js'
+import { checkUpdate, type UpdateInfo } from './updater.js'
 
 export function App() {
   const [graph, setGraph] = useState<ProvGraph | null>(null)
@@ -17,6 +18,8 @@ export function App() {
   /** いま居る版。チャットはここから分岐する */
   const [current, setCurrent] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** 起動時に自動で確認した結果。見つかったら設定ボタンに印を出す */
+  const [update, setUpdate] = useState<UpdateInfo | null>(null)
 
   const applyDoc = useCallback((doc: ProvJsonLdDocument) => {
     setGraph(fromProvJsonLd(doc, DEFAULT_BASE))
@@ -37,6 +40,14 @@ export function App() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // 起動時に自動で更新を確認する。失敗しても黙って諦める——
+  // 配信先が落ちているだけで本体が使えなくなるのは筋が違う
+  useEffect(() => {
+    void checkUpdate()
+      .then(setUpdate)
+      .catch(() => undefined)
+  }, [])
 
   /** 保存先が変わったら、サイドカーを入れ直して読み直す */
   const reloadWorkspace = useCallback(async () => {
@@ -86,6 +97,7 @@ export function App() {
         onOpen={setCurrent}
         onNew={() => setCurrent(null)}
         onOpenSettings={() => setSettingsOpen(true)}
+        updateAvailable={update !== null}
       />
 
       <ReactFlowProvider>
@@ -98,6 +110,8 @@ export function App() {
         <SettingsDialog
           onClose={() => setSettingsOpen(false)}
           onWorkspaceChanged={() => void reloadWorkspace()}
+          update={update}
+          onUpdateChecked={setUpdate}
         />
       ) : null}
     </div>

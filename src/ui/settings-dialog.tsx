@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, isTauri } from './api-base.js'
 import { PALETTE } from './palette.js'
+import { appVersion, checkUpdate, installAndRelaunch, type UpdateInfo } from './updater.js'
 
 interface WorkspaceInfo {
   current: string
@@ -43,17 +44,29 @@ const INPUT: React.CSSProperties = {
 export function SettingsDialog({
   onClose,
   onWorkspaceChanged,
+  update,
+  onUpdateChecked,
 }: {
   onClose: () => void
   /** 保存先が変わったら、サイドカーを入れ直してグラフを読み直してもらう */
   onWorkspaceChanged: () => void
+  /** 起動時の自動確認で見つかっていた更新（無ければ null） */
+  update: UpdateInfo | null
+  onUpdateChecked: (update: UpdateInfo | null) => void
 }) {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [identity, setIdentity] = useState<Identity>({ name: '', email: '' })
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [version, setVersion] = useState('')
+  const [updateState, setUpdateState] = useState<
+    'idle' | 'checking' | 'none' | 'installing'
+  >('idle')
+  const [progress, setProgress] = useState(0)
 
   useEffect(() => {
+    void appVersion().then(setVersion)
+
     void apiFetch('api/identity')
       .then((r) => r.json())
       .then((v: Identity) => setIdentity(v))
@@ -84,6 +97,32 @@ export function SettingsDialog({
     const { invoke } = await import('@tauri-apps/api/core')
     setWorkspace(await invoke<WorkspaceInfo>('set_workspace_root', { path: null }))
     onWorkspaceChanged()
+  }
+
+  async function runCheck() {
+    setUpdateState('checking')
+    setError(null)
+    try {
+      const found = await checkUpdate()
+      onUpdateChecked(found)
+      setUpdateState(found ? 'idle' : 'none')
+    } catch (e: unknown) {
+      setUpdateState('idle')
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function runInstall() {
+    setUpdateState('installing')
+    setError(null)
+    try {
+      await installAndRelaunch((done, total) =>
+        setProgress(total ? Math.round((done / total) * 100) : 0),
+      )
+    } catch (e: unknown) {
+      setUpdateState('idle')
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   async function saveIdentity() {
@@ -206,6 +245,81 @@ export function SettingsDialog({
         >
           {saved ? '保存しました' : 'identity を保存'}
         </button>
+
+        <label style={LABEL}>アプリ情報</label>
+        <div
+          style={{
+            border: '1px solid #e0e5e8',
+            borderRadius: 8,
+            padding: '10px 12px',
+            fontSize: 13,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ color: '#5c6b73' }}>アプリ名</span>
+            <span>PROVision</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+            <span style={{ color: '#5c6b73' }}>バージョン</span>
+            <code style={{ fontFamily: 'ui-monospace, monospace' }}>{version || '—'}</code>
+          </div>
+        </div>
+
+        <label style={LABEL}>更新</label>
+        {!isTauri() ? (
+          <p style={{ fontSize: 12, color: '#7b8892', margin: 0 }}>
+            更新の確認はデスクトップ版でのみ利用できます。
+          </p>
+        ) : update ? (
+          <div
+            style={{
+              border: `1px solid ${PALETTE.activity.main}`,
+              background: PALETTE.activity.bg,
+              borderRadius: 8,
+              padding: '10px 12px',
+            }}
+          >
+            <p style={{ fontSize: 13, margin: '0 0 4px', color: PALETTE.activity.text }}>
+              新しいバージョン <strong>{update.version}</strong> があります（いまは{' '}
+              {update.currentVersion}）。
+            </p>
+            <p style={{ fontSize: 11.5, color: '#5c6b73', margin: '0 0 8px' }}>
+              当てるには再起動が要ります。生成の途中でないことを確かめてください。
+            </p>
+            <button
+              type="button"
+              onClick={() => void runInstall()}
+              disabled={updateState === 'installing'}
+              style={{
+                padding: '8px 16px',
+                border: 'none',
+                borderRadius: 8,
+                background: PALETTE.activity.main,
+                color: '#fff',
+                fontSize: 13,
+                cursor: updateState === 'installing' ? 'default' : 'pointer',
+              }}
+            >
+              {updateState === 'installing'
+                ? `更新中… ${progress}%`
+                : '更新して再起動'}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => void runCheck()}
+              disabled={updateState === 'checking'}
+              style={INPUT_BUTTON}
+            >
+              {updateState === 'checking' ? '確認中…' : '更新を確認'}
+            </button>
+            {updateState === 'none' ? (
+              <span style={{ fontSize: 12, color: '#5c6b73' }}>最新です。</span>
+            ) : null}
+          </div>
+        )}
 
         {error ? (
           <p style={{ fontSize: 12, color: '#a8513f', marginTop: 12 }}>{error}</p>

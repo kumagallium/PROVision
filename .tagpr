@@ -7,6 +7,10 @@
 # package.json も列挙するのが要。Graphium で command による同期を試したところ、
 # command は「バージョン決定の直前」＝ versionFile 更新前に走るため、常に
 # 1 リリース古い値を読んでいた。表示バージョンは package.json 由来なので実害が出る。
+#
+# 両ファイルの version は**必ず同じ値で始める**こと。tagpr は先頭ファイルの
+# 現在値と一致するファイルだけ書き換えるので、ずれていると片方が置き去りになる
+# （実際に package.json が 0.0.1 のまま取り残された）。
 versionFile = src-tauri/tauri.conf.json,package.json
 releaseBranch = main
 vPrefix = true
