@@ -49,7 +49,7 @@
         "https://kumagallium.github.io/PROVision/updater/latest.json",
         "https://github.com/kumagallium/PROVision/releases/latest/download/latest.json"
       ],
-      "pubkey": "PLACEHOLDER_REPLACE_WITH_MINISIGN_PUBLIC_KEY"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCMzYzMEQ1REQ4M0VEMUEKUldRYTdZUGQxVEEyMjdBdEZHdFQ5bEl3bGxhTFlTa3h2YmhWNVgxYVhsbzg0QjdUZlFGU0R1K2MK"
     }
   }
 }
