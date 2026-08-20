@@ -1,6 +1,11 @@
 {
-  "version": "0.0.0",
-  "notes": "初期プレースホルダ。最初のデスクトップリリースで上書きされる",
-  "pub_date": "2026-08-20T00:00:00Z",
-  "platforms": {}
+  "version": "0.1.0",
+  "notes": "変更点は CHANGELOG を参照",
+  "pub_date": "2026-08-20T05:00:30Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRYTdZUGQxVEEyMjR4MkdZVHVOU3NGaEVHWHo5OTh3dlM5TjA0TytYSFJlTUZsVUF2cUVBT1h6S0hITlk1TzBMYjNBc3BzelQvbXljTE5CaWRuSDlrSFBSYXpzeVNIK1FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MjAyMDAwCWZpbGU6UFJPVmlzaW9uLmFwcC50YXIuZ3oKOFhJM1dvMVhaMmJqK1pJQXhkN1d4RlR1S2praEh1TUljRlZpNUI3a0dadVphaDNUbnJJRG9QUnAzWnJUNmRRMm5lbVpiYjRxdnpxUHc4NjBpcU45QVE9PQo=",
+      "url": "https://github.com/kumagallium/PROVision/releases/download/v0.1.0/PROVision_0.1.0_aarch64.app.tar.gz"
+    }
+  }
 }
