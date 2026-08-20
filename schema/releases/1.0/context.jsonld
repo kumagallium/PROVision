@@ -1,0 +1,19 @@
+{
+  "@context": {
+    "provision": "https://kumagallium.github.io/provision-schema/releases/1.0/context.jsonld#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+
+    "prompt":         { "@id": "provision:prompt",         "@type": "xsd:string" },
+    "negativePrompt": { "@id": "provision:negativePrompt", "@type": "xsd:string" },
+    "model":          { "@id": "provision:model",          "@type": "xsd:string" },
+    "provider":       { "@id": "provision:provider",       "@type": "xsd:string" },
+    "seed":           { "@id": "provision:seed",           "@type": "xsd:integer" },
+    "steps":          { "@id": "provision:steps",          "@type": "xsd:integer" },
+    "guidance":       { "@id": "provision:guidance",       "@type": "xsd:decimal" },
+    "width":          { "@id": "provision:width",          "@type": "xsd:integer" },
+    "height":         { "@id": "provision:height",         "@type": "xsd:integer" },
+    "intent":         { "@id": "provision:intent",         "@type": "xsd:string" },
+    "imageDigest":    { "@id": "provision:imageDigest",    "@type": "xsd:string" },
+    "mediaType":      { "@id": "provision:mediaType",      "@type": "xsd:string" }
+  }
+}

@@ -1,0 +1,64 @@
+# PROVision
+
+**チャットで作った図版の系譜を、W3C PROV のグラフとして残す道具。**
+
+研究・技術資料の図版（概念図・グラフィカルアブストラクト・スライド図版）は、
+何十回も作り直された末に 1 枚が論文に載る。載ったのがどの版で、どの指示から生まれ、
+元データのどの版に基づいていたのかは、普通は再現できない。PROVision はそこを残す。
+
+生成 1 回を `prov:Activity`、画像 1 枚を `prov:Entity` として記録し、
+派生を `prov:wasDerivedFrom` で繋ぐ。自然言語の指示（「もっと余白を取って」）は
+Activity の属性として載せる。書き出すのは **PROV-JSONLD のファイル 1 つ**。DB もサーバも要らない。
+
+## C2PA / Content Credentials と何が違うか
+
+C2PA は**ファイル 1 個に署名付きメタデータを埋める**仕組みで、来歴はそのファイルに閉じている。
+Midjourney のジョブツリーや ComfyUI のワークフローも、ツール内に閉じた履歴である。
+
+PROVision が狙うのはそこではない。
+
+> **系譜が領域（ノート・データ・画像）をまたいで 1 つの PROV グラフになり、
+> AI が SPARQL / MCP でクエリできること。**
+
+図版は [Graphium](https://github.com/kumagallium/Graphium) のノートに貼られ、
+その元データは [asterism](https://github.com/kumagallium/asterism) にある。
+どちらも PROV を語彙にしているので、**変換なしで 1 つのグラフに繋がる**。
+「この図版は、どのデータセットのどの版に基づいているか」を SPARQL で遡れる——
+これはファイル単位の署名では原理的に答えられない問いで、PROVision の存在理由でもある。
+
+そのため **W3C PROV に完全準拠する**。独自拡張は `provision` 名前空間に、
+画像生成に固有の語（prompt / model / seed）だけを最小限置く。
+他ドメインの語彙（matprov 等）は取り込まない。**連携できることが差別化の本体**だから。
+
+## 使う
+
+```bash
+pnpm install
+pnpm test        # vitest
+pnpm typecheck   # tsc --noEmit
+
+# 動作確認用のサンプルグラフを書き出す
+pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
+```
+
+書き出した JSON-LD は [prov-jsonld-viz](https://github.com/kumagallium/prov-jsonld-viz)
+にそのまま貼れば派生グラフとして描画される（実機で確認済み）。
+
+## 決めたこと
+
+段階間の契約は [`docs/decisions.md`](docs/decisions.md) にある。要点:
+
+| | 決定 |
+|---|---|
+| 粒度 | 画像 1 枚 = 1 Entity。同一性は内容の SHA-256 |
+| Activity | prompt / model / seed / 時刻は**必須**。欠けたら記録を拒否する |
+| 意図 | Activity の `provision:intent`。辺は素の `wasDerivedFrom` のまま |
+| 語彙 | 素の PROV ＋ `provision` の最小拡張のみ |
+
+## 不変条件
+
+- **元の絵を加工しない。** 派生は必ず新しい Entity を作る。
+  内容ハッシュが IRI を決めるので、既存 Entity の書き換えは構造上できない
+- **再現に要る情報を落とさない。** seed / モデル識別子 / プロンプト全文。
+  1 つ欠けると「再実行できる」という価値の柱が折れるので、書き込み時に弾く
+- **W3C PROV から外れない。** 語彙の独自化は連携の断絶であり、製品価値の毀損に直結する
