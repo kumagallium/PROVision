@@ -7,6 +7,7 @@
 import type { ProvGraph } from '../prov/graph.js'
 import { imageUrlOf } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
+import { ProvImage } from './prov-image.js'
 
 export function HistoryPane({
   graph,
@@ -60,15 +61,10 @@ export function HistoryPane({
               font: 'inherit',
             }}
           >
-            {entity && imageUrlOf(entity) ? (
-              <img
-                src={imageUrlOf(entity)}
-                alt=""
-                style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 5 }}
-              />
-            ) : (
-              <div style={{ width: 40, height: 40, borderRadius: 5, background: '#eef1f2' }} />
-            )}
+            <ProvImage
+              path={entity ? imageUrlOf(entity) : undefined}
+              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 5 }}
+            />
             <span style={{ minWidth: 0 }}>
               <span
                 style={{

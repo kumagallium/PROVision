@@ -14,6 +14,8 @@ import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { imageUrlOf } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
 import { DetailPanel } from './detail-panel.js'
+import { ProvImage } from './prov-image.js'
+import { apiFetch } from './api-base.js'
 
 interface Props {
   graph: ProvGraph | null
@@ -38,7 +40,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/generate', {
+      const res = await apiFetch('api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ intent, ...(current ? { parent: current } : {}) }),
@@ -112,7 +114,11 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
                     background: 'none',
                   }}
                 >
-                  <img src={url} alt={entity?.label} style={{ display: 'block', width: 220 }} />
+                  <ProvImage
+                    path={url}
+                    alt={entity?.label}
+                    style={{ display: 'block', width: 220 }}
+                  />
                 </button>
               ) : null}
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>

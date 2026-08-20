@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { FlowNodeData } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
+import { ProvImage } from './prov-image.js'
 
 const card = (main: string, bg: string, selected: boolean): React.CSSProperties => ({
   border: `1.5px solid ${main}`,
@@ -25,13 +26,11 @@ export function ImageNode({ data, selected }: NodeProps) {
   return (
     <div style={{ ...card(c.main, c.bg, selected === true), width: 168 }}>
       <Handle type="target" position={Position.Top} />
-      {d.imageUrl ? (
-        <img
-          src={d.imageUrl}
-          alt={d.label}
-          style={{ display: 'block', width: 168, height: 168, objectFit: 'cover' }}
-        />
-      ) : null}
+      <ProvImage
+        path={d.imageUrl}
+        alt={d.label}
+        style={{ display: 'block', width: 168, height: 168, objectFit: 'cover' }}
+      />
       <div style={title(c.text)}>{d.label}</div>
       <Handle type="source" position={Position.Bottom} />
     </div>

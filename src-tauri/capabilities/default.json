@@ -1,0 +1,23 @@
+{
+  "identifier": "default",
+  "description": "PROVision デスクトップアプリの既定権限",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [{ "name": "binaries/provision-server", "sidecar": true }]
+    },
+    "shell:allow-kill",
+    "updater:default",
+    "process:allow-restart",
+    "opener:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://127.0.0.1:8788/*" },
+        { "url": "http://localhost:8788/*" }
+      ]
+    }
+  ]
+}

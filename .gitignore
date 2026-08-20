@@ -6,3 +6,9 @@ tmp/
 .DS_Store
 .env
 .env.*
+
+# サイドカーに同梱する Node と、バンドルしたサーバ。どちらも生成物
+src-tauri/binaries/
+src-tauri/sidecar/
+src-tauri/target/
+src-tauri/gen/

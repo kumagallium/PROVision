@@ -17,6 +17,7 @@ import { nodeTypes } from './nodes.js'
 import { EDGE_STYLE } from './palette.js'
 import { HistoryPane } from './history-pane.js'
 import { ChatPane } from './chat-pane.js'
+import { apiFetch, ensureSidecar } from './api-base.js'
 
 /** ノードの実寸。カードの幅は固定なので、測らずに渡してよい */
 const SIZE: Record<string, { width: number; height: number }> = {
@@ -38,7 +39,9 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    fetch('/api/graph')
+    // デスクトップ版ではまずサイドカーを起こす。ブラウザでは何もしない
+    ensureSidecar()
+      .then(() => apiFetch('api/graph'))
       .then(async (r) => {
         if (!r.ok) throw new Error(`グラフが読めない（${r.status}）`)
         return (await r.json()) as ProvJsonLdDocument

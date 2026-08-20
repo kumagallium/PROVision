@@ -74,6 +74,40 @@ pnpm dev   # 画面（5173）とローカルサーバ（8788）が一緒に上�
 書き出した JSON-LD は [prov-jsonld-viz](https://github.com/kumagallium/prov-jsonld-viz)
 にそのまま貼っても描画される（実機で確認済み）。
 
+## デスクトップ版
+
+```bash
+node scripts/fetch-node.mjs      # 同梱する Node を取ってくる（初回だけ）
+pnpm tauri dev                   # 開発
+pnpm tauri build                 # 配布物を組む
+```
+
+Tauri。画面はブラウザ版とまったく同じで、画像生成とグラフの保存は
+**同梱した Node + Hono のサイドカー**が担う。構成は geo-logo（元は Graphium）から移植した。
+
+踏み抜いた罠も一緒に持ってきている:
+
+- WebView から `http://127.0.0.1` への**素の fetch は mixed content で落ちる**。
+  `src/ui/api-base.ts` の `apiFetch` が `@tauri-apps/plugin-http` に迂回する。
+  画像も同じ理由で `ProvImage` が blob: に変えてから `<img>` に渡す
+- `.app` 起動時の cwd は `/` なので、既定の `cwd/data` は作れない。
+  置き場は Rust 側で決めて `PROVISION_DATA_DIR` で必ず渡す
+- サイドカーは Rust から直接 spawn する。Shell プラグイン経由だと Windows で
+  spawn は成功するのに stdout/stderr が届かず、起動失敗の原因が追えない
+
+### リリース
+
+tagpr（`.tagpr`）＋ GitHub Actions。`main` に入ると tagpr がリリース PR を作り、
+merge でタグが打たれ、`desktop-build.yml` が macOS (Apple Silicon) の配布物を組んで
+Release に添付する。
+
+**まだ設定が要るもの**（どちらも鍵と証明書なので、リポジトリの持ち主が用意する）:
+
+| 要るもの | 作り方 |
+|---|---|
+| `tauri.conf.json` の `pubkey` | `pnpm tauri signer generate -w ~/.tauri/provision.key`。公開鍵を貼り、秘密鍵は `TAURI_SIGNING_PRIVATE_KEY` に入れる |
+| 署名・公証 | `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` |
+
 ## 横断クエリ（グラフでしかできないこと）
 
 図版の系譜と、asterism が持つ測定データを **1 本の SPARQL で跨ぐ**。
