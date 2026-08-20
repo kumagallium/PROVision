@@ -24,21 +24,32 @@ const title = (text: string, lines = 2): React.CSSProperties => ({
   overflow: 'hidden',
 })
 
-/** 画像（prov:Entity）。中身が見えないと版を見分けられないので必ずサムネイルを出す */
+/**
+ * 画像（prov:Entity）。**絵だけを出す。**
+ *
+ * 見出しに指示文を重ねていたが、すぐ上の生成ノードが同じ文を出しているので
+ * 二重になっていた。ここで見たいのは「どんな絵になったか」だけ。
+ * 文言はホバーで出す。
+ */
 export function ImageNode({ data, selected }: NodeProps) {
   const d = data as FlowNodeData
   const c = PALETTE.image
   return (
-    <div style={{ ...card(c.main, c.bg, selected === true), width: 168 }}>
+    <div
+      style={{ ...card(c.main, c.bg, selected === true), width: 168 }}
+      title={d.label}
+    >
       <Handle type="target" position={Position.Top} />
-      <ProvImage
-        path={d.imageUrl}
-        alt={d.label}
-        style={{ display: 'block', width: 168, height: 168, objectFit: 'cover' }}
-      />
-      <div style={title(c.text)} title={d.label}>
-        {d.label}
-      </div>
+      {d.imageUrl ? (
+        <ProvImage
+          path={d.imageUrl}
+          alt={d.label}
+          style={{ display: 'block', width: 168, height: 168, objectFit: 'cover' }}
+        />
+      ) : (
+        // 画像が無いのは記録が壊れているとき。黙って空白にせず、何の版かは言う
+        <div style={title(c.text)}>{d.label}</div>
+      )}
       <Handle type="source" position={Position.Bottom} />
     </div>
   )
