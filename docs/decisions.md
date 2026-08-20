@@ -91,6 +91,10 @@ IRI は `{base}/resource/image/{sha256}`。
 付けると Usage / Generation / Association が孤立した点として画面に散らばる（実機で確認）。
 `@id` を落とせば辺だけが描かれる。JSON-LD としては空白ノードになるだけで問題ない。
 
+**参照した外部リソースにもノードを置く。** 置かないと viz が「端点の無い辺」を作ろうとして
+cytoscape が例外を投げ、**辺が 1 本も描かれない**（実機で確認。ノード 12・辺 0 になった）。
+置くのは IRI と `prov:Entity` だけで、中身は主張しない——それは asterism 側の言うことである。
+
 **`prov:Derivation` の実体ノードは書かない。** viz は辺を描かず、孤立ノードが増えるだけだった。
 派生は Entity 側の `prov:wasDerivedFrom` として直接持たせてあり、SPARQL からはそちらで引ける
 （`?new prov:wasDerivedFrom ?old`）。詳細が要る場合も `wasGeneratedBy` + `used` で辿れる。

@@ -132,6 +132,18 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
     nodes.push(entityNode(e, act?.used ?? [], act?.id))
   }
 
+  // 人間が参照した外部リソース（asterism の曲線など）にもノードを置く。
+  // 無いと prov-jsonld-viz が「端点の無い辺」で例外を投げ、辺が 1 本も描かれない（実機で確認）。
+  // 中身は主張しない——IRI と、asterism 側でも真である prov:Entity だけ
+  const referenced = new Set(data.activities.flatMap((a) => a.referenced))
+  for (const id of referenced) {
+    nodes.push({
+      '@id': id,
+      '@type': 'Entity',
+      label: lit(id.split('/').slice(-2).join('/')),
+    })
+  }
+
   for (const a of data.activities) nodes.push(activityNode(a))
 
   // 関係は実体ノードとしても並べる（viz が辺を描くのはこちら）。
@@ -172,6 +184,8 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
     if (!id) continue
 
     if (t === 'Entity') {
+      // 外部リソースのノードには imageDigest が無い。こちらの画像ではないので取り込まない
+      if (firstValue(n, 'provision:imageDigest') === undefined) continue
       entities.push({
         id,
         label: String(firstValue(n, 'label') ?? id),

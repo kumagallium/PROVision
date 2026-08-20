@@ -68,6 +68,16 @@ describe('外部リソースの参照', () => {
     expect(lines.some((l) => l.includes('#Person'))).toBe(true)
   })
 
+  it('外部リソースにもノードを置く（viz が辺を描けるように）', () => {
+    const { graph } = graphWithReference()
+    const nodes = toProvJsonLd(graph)['@graph']
+    const stub = nodes.find((n) => n['@id'] === CURVE)
+    expect(stub).toBeDefined()
+    expect(stub!['@type']).toBe('Entity')
+    // 中身は主張しない。imageDigest はこちらの画像にしか付かない
+    expect(stub!['provision:imageDigest']).toBeUndefined()
+  })
+
   it('JSON-LD を往復しても派生元と参照が混ざらない', () => {
     const { graph } = graphWithReference()
     const restored = fromProvJsonLd(toProvJsonLd(graph), DEFAULT_BASE)
