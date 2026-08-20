@@ -111,3 +111,7 @@ git clone https://github.com/kumagallium/asterism ~/develop/asterism
 - **再現に要る情報を落とさない。** seed / モデル識別子 / プロンプト全文。
   1 つ欠けると「再実行できる」という価値の柱が折れるので、書き込み時に弾く
 - **W3C PROV から外れない。** 語彙の独自化は連携の断絶であり、製品価値の毀損に直結する
+
+## ライセンス
+
+Apache License 2.0（asterism に揃えた）。`schema/` の `@context` も同じ条件で使ってよい。
