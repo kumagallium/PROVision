@@ -6,6 +6,7 @@
 // 構成は geo-logo（さらに元は Graphium）から移植した。踏み抜いた罠も引き継いでいる。
 
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -16,6 +17,100 @@ use tauri::{Emitter, Manager};
 struct SidecarState(Mutex<Option<u32>>);
 
 const DEFAULT_PORT: u16 = 8788;
+
+/// 利用者が明示した保存先だけを持つ設定。app_data_dir/config.json に置く。
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AppConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_root: Option<String>,
+}
+
+/// 画面に「いまどこに置いているか」を出すための現在値と既定値。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceInfo {
+    current: String,
+    default: String,
+    /// 利用者が明示的に選んだ場所か
+    custom: bool,
+}
+
+fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("設定の置き場を解決できません: {e}"))?;
+    let _ = std::fs::create_dir_all(&dir);
+    Ok(dir.join("config.json"))
+}
+
+fn read_config(app: &tauri::AppHandle) -> AppConfig {
+    config_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// 既定の保存先。**Documents の下**に置く。
+///
+/// Application Support に隠すと、利用者が中身（グラフの JSON-LD と画像）を
+/// 見にいけない。この道具の成果物は「書き出したファイルそのもの」なので、
+/// 手の届く場所に置く。Graphium と同じ方針。
+fn default_workspace(app: &tauri::AppHandle) -> PathBuf {
+    app.path()
+        .document_dir()
+        .map(|d| d.join("PROVision"))
+        .unwrap_or_else(|_| {
+            app.path()
+                .app_data_dir()
+                .expect("データディレクトリを解決できません")
+                .join("run")
+        })
+}
+
+fn workspace_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = match read_config(app).workspace_root {
+        Some(p) if !p.trim().is_empty() => PathBuf::from(p),
+        _ => default_workspace(app),
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{} を作れません: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+#[tauri::command]
+fn get_workspace_root(app: tauri::AppHandle) -> Result<WorkspaceInfo, String> {
+    let default = default_workspace(&app);
+    let current = workspace_dir(&app)?;
+    Ok(WorkspaceInfo {
+        custom: current != default,
+        current: current.to_string_lossy().into_owned(),
+        default: default.to_string_lossy().into_owned(),
+    })
+}
+
+/// 保存先を変える。**中身は移さない**——移動は利用者の判断でやってもらう。
+/// 黙って動かすと、どちらが本物か分からなくなる。
+#[tauri::command]
+fn set_workspace_root(app: tauri::AppHandle, path: Option<String>) -> Result<WorkspaceInfo, String> {
+    let config = AppConfig {
+        workspace_root: path.filter(|p| !p.trim().is_empty()),
+    };
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(config_path(&app)?, json).map_err(|e| format!("設定を書けません: {e}"))?;
+    get_workspace_root(app)
+}
+
+/// フォルダ選択ダイアログ。選ばれなければ None
+#[tauri::command]
+async fn pick_workspace_root(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    // blocking_* は非同期コマンド（＝別スレッド）から呼ぶ。
+    // メインスレッドで呼ぶと macOS で固まる
+    let picked = app.dialog().file().blocking_pick_folder();
+    Ok(picked.map(|p| p.to_string()))
+}
 
 /// PID を殺す。プラットフォーム差を吸収する。
 fn kill_pid(pid: u32) {
@@ -78,13 +173,8 @@ fn start_sidecar(
     }
 
     // グラフと画像の置き場。.app 起動時の cwd は / なので、既定の cwd/data は作れない。
-    // ここで OS 標準の場所を決めて必ず環境変数で渡す（geo-logo で踏んだ）
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("データディレクトリを解決できません: {e}"))?
-        .join("run");
-    let _ = std::fs::create_dir_all(&data_dir);
+    // ここで場所を決めて必ず環境変数で渡す（geo-logo で踏んだ）
+    let data_dir = workspace_dir(&app)?;
     log(format!("[sidecar] data: {}", data_dir.display()));
 
     let mut cmd = Command::new(&node);
@@ -153,12 +243,7 @@ fn stop_sidecar(state: tauri::State<'_, SidecarState>) -> Result<(), String> {
 #[tauri::command]
 fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("データディレクトリを解決できません: {e}"))?
-        .join("run");
-    let _ = std::fs::create_dir_all(&dir);
+    let dir = workspace_dir(&app)?;
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("フォルダを開けません: {e}"))
@@ -171,6 +256,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(SidecarState(Mutex::new(None)));
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -182,7 +268,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_sidecar,
             stop_sidecar,
-            open_data_dir
+            open_data_dir,
+            get_workspace_root,
+            set_workspace_root,
+            pick_workspace_root
         ])
         .run(tauri::generate_context!())
         .expect("PROVision の起動に失敗しました");

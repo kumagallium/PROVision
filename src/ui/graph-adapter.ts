@@ -48,12 +48,27 @@ export function imageUrlOf(entity: ImageEntity): string | undefined {
   return name ? `/api/images/${name}` : undefined
 }
 
-export function toFlow(graph: ProvGraph): { nodes: FlowNode[]; edges: FlowEdge[] } {
+/**
+ * グラフを React Flow のノード・辺にする。
+ *
+ * `root` を渡すと、その会話（根ごとの連結成分）だけを写す。
+ * 真ん中の面には「いま話している会話」だけを出すため。
+ */
+export function toFlow(
+  graph: ProvGraph,
+  root?: string,
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
   const at = { x: 0, y: 0 }
 
-  for (const entity of graph.listEntities()) {
+  const entities = root === undefined ? graph.listEntities() : graph.session(root)
+  const inScope = new Set(entities.map((e) => e.id))
+  const activities = graph
+    .listActivities()
+    .filter((a) => inScope.has(a.generated))
+
+  for (const entity of entities) {
     nodes.push({
       id: entity.id,
       type: 'image',
@@ -68,7 +83,7 @@ export function toFlow(graph: ProvGraph): { nodes: FlowNode[]; edges: FlowEdge[]
   }
 
   const externals = new Set<Iri>()
-  for (const activity of graph.listActivities()) {
+  for (const activity of activities) {
     nodes.push({
       id: activity.id,
       type: 'activity',

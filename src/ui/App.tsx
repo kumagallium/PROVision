@@ -15,9 +15,10 @@ import { toFlow } from './graph-adapter.js'
 import { layoutGraph } from './elk-layout.js'
 import { nodeTypes } from './nodes.js'
 import { EDGE_STYLE } from './palette.js'
-import { HistoryPane } from './history-pane.js'
+import { SessionPane } from './session-pane.js'
 import { ChatPane } from './chat-pane.js'
-import { apiFetch, ensureSidecar } from './api-base.js'
+import { apiFetch, ensureSidecar, isTauri } from './api-base.js'
+import { SettingsDialog } from './settings-dialog.js'
 
 /** ノードの実寸。カードの幅は固定なので、測らずに渡してよい */
 const SIZE: Record<string, { width: number; height: number }> = {
@@ -33,14 +34,15 @@ export function App() {
   const [edges, setEdges] = useState<Edge[]>([])
   /** いま居る版。チャットはここから分岐する */
   const [current, setCurrent] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const applyDoc = useCallback((doc: ProvJsonLdDocument) => {
     setGraph(fromProvJsonLd(doc, DEFAULT_BASE))
   }, [])
 
-  useEffect(() => {
+  const load = useCallback(() => {
     // デスクトップ版ではまずサイドカーを起こす。ブラウザでは何もしない
-    ensureSidecar()
+    return ensureSidecar()
       .then(() => apiFetch('api/graph'))
       .then(async (r) => {
         if (!r.ok) throw new Error(`グラフが読めない（${r.status}）`)
@@ -50,7 +52,30 @@ export function App() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [applyDoc])
 
-  const flow = useMemo(() => (graph ? toFlow(graph) : null), [graph])
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  /** 保存先が変わったら、サイドカーを入れ直して読み直す */
+  const reloadWorkspace = useCallback(async () => {
+    setCurrent(null)
+    if (isTauri()) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('stop_sidecar')
+    }
+    await load()
+  }, [load])
+
+  /** いま話している会話の根。真ん中の面はこの会話だけを描く */
+  const currentRoot = useMemo(
+    () => (graph && current ? graph.rootOf(current) : undefined),
+    [graph, current],
+  )
+
+  const flow = useMemo(
+    () => (graph ? toFlow(graph, currentRoot) : null),
+    [graph, currentRoot],
+  )
 
   useEffect(() => {
     if (!flow) return
@@ -114,13 +139,19 @@ export function App() {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '240px 1fr 400px',
+        gridTemplateColumns: '250px 1fr 400px',
         height: '100vh',
         fontFamily: 'system-ui, sans-serif',
         background: '#fbfcfc',
       }}
     >
-      <HistoryPane graph={graph} current={current} onSelect={setCurrent} />
+      <SessionPane
+        graph={graph}
+        currentRoot={currentRoot}
+        onOpen={setCurrent}
+        onNew={() => setCurrent(null)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
       <div style={{ minWidth: 0, borderLeft: '1px solid #e0e5e8' }}>
         <ReactFlow
@@ -138,6 +169,13 @@ export function App() {
       </div>
 
       <ChatPane graph={graph} current={current} onGraph={applyDoc} onSelect={setCurrent} />
+
+      {settingsOpen ? (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onWorkspaceChanged={() => void reloadWorkspace()}
+        />
+      ) : null}
     </div>
   )
 }

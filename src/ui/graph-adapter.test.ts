@@ -95,3 +95,46 @@ describe('React Flow への写し取り', () => {
     ).toBe('/api/images/aaa.png')
   })
 })
+
+describe('会話（根ごとの連結成分）', () => {
+  it('根を持たない語彙を足さずに会話を切り出せる', () => {
+    const g = branchingGraph()
+    // もう 1 本、別の会話を足す
+    const other = g.recordGeneration({
+      image: bytes('kuma-1'),
+      label: '熊のロゴ',
+      prompt: 'a bear',
+      model: 'm',
+      seed: 9,
+      startedAtTime: '2026-08-20T12:00:00Z',
+      endedAtTime: '2026-08-20T12:00:10Z',
+    })
+
+    expect(g.roots()).toHaveLength(2)
+    expect(g.session(other.id).map((e) => e.label)).toEqual(['熊のロゴ'])
+
+    const first = g.roots().find((r) => r.label === 'v1')!
+    expect(g.session(first.id).map((e) => e.label)).toEqual(['v1', 'v2', 'v3a', 'v3b'])
+    expect(g.rootOf(g.listEntities().find((e) => e.label === 'v3b')!.id)).toBe(first.id)
+  })
+
+  it('真ん中の面には、いま話している会話だけを写す', () => {
+    const g = branchingGraph()
+    g.recordGeneration({
+      image: bytes('kuma-1'),
+      label: '熊のロゴ',
+      prompt: 'a bear',
+      model: 'm',
+      seed: 9,
+      startedAtTime: '2026-08-20T12:00:00Z',
+      endedAtTime: '2026-08-20T12:00:10Z',
+    })
+
+    const first = g.roots().find((r) => r.label === 'v1')!
+    const { nodes } = toFlow(g, first.id)
+    expect(nodes.filter((n) => n.type === 'image')).toHaveLength(4)
+    expect(nodes.some((n) => n.data.label === '熊のロゴ')).toBe(false)
+    // 参照した外部リソースは、その会話のぶんだけ出る
+    expect(nodes.filter((n) => n.type === 'external')).toHaveLength(1)
+  })
+})

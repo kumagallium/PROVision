@@ -31,7 +31,45 @@ let graph: ProvGraph = existsSync(GRAPH_PATH)
   : new ProvGraph()
 
 const tool = graph.addAgent('mflux', 'mflux (z-image-turbo-4bit)')
-const person = graph.addAgent('kumagallium', 'kumagallium', 'Person')
+
+/**
+ * 来歴の author。**自己申告で、検証はしない。**
+ *
+ * PROV の `prov:wasAssociatedWith` に載る人間 Agent がこれである。
+ * D-006 で「データを参照したという主張の責任者は人間 Agent」と決めたので、
+ * 誰なのかを名乗れないと、その主張の宛先が無くなる。
+ */
+interface Identity {
+  name: string
+  email: string
+}
+
+const IDENTITY_PATH = join(DATA_DIR, 'identity.json')
+
+async function readIdentity(): Promise<Identity> {
+  if (!existsSync(IDENTITY_PATH)) return { name: '', email: '' }
+  try {
+    const raw = JSON.parse(await readFile(IDENTITY_PATH, 'utf8')) as Partial<Identity>
+    return { name: raw.name ?? '', email: raw.email ?? '' }
+  } catch {
+    return { name: '', email: '' }
+  }
+}
+
+/** 人間 Agent の IRI に使う識別子。メールがあればそれを、無ければ名前を種にする */
+function personSlug(identity: Identity): string {
+  const seed = identity.email.trim() || identity.name.trim()
+  return seed ? sha256(seed.toLowerCase()).slice(0, 16) : 'anonymous'
+}
+
+async function personAgent() {
+  const identity = await readIdentity()
+  return graph.addAgent(
+    personSlug(identity),
+    identity.name.trim() || identity.email.trim() || '名乗っていない利用者',
+    'Person',
+  )
+}
 
 /**
  * 生成は直列に捌く。並行させるとピークメモリで落ちる（geo-logo の実測）。
@@ -68,6 +106,18 @@ app.get('/api/health', (c) =>
 )
 
 app.get('/api/graph', (c) => c.json(toProvJsonLd(graph)))
+
+app.get('/api/identity', async (c) => c.json(await readIdentity()))
+
+app.put('/api/identity', async (c) => {
+  const body = (await c.req.json()) as Partial<Identity>
+  const identity: Identity = {
+    name: String(body.name ?? '').slice(0, 200),
+    email: String(body.email ?? '').slice(0, 200),
+  }
+  await writeFile(IDENTITY_PATH, `${JSON.stringify(identity, null, 2)}\n`, 'utf8')
+  return c.json(identity)
+})
 
 /** 画像を配る。ファイル名しか受け取らないので、data の外は読めない */
 app.get('/api/images/:name', async (c) => {
@@ -168,7 +218,7 @@ app.post('/api/generate', async (c) => {
         ...(body.intent?.trim() ? { intent: body.intent } : {}),
         ...(body.parent ? { derivedFrom: [body.parent] } : {}),
         ...(body.referenced?.length ? { referenced: body.referenced } : {}),
-        agents: [tool.id, person.id],
+        agents: [tool.id, (await personAgent()).id],
       })
       await persist()
       return recorded

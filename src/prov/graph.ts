@@ -207,6 +207,44 @@ export class ProvGraph {
     return chain
   }
 
+  /**
+   * 会話の根。親を持たない生成が生んだ画像。
+   *
+   * 会話（セッション）は別の語彙で表さない。**根ごとの連結成分がそのまま 1 つの会話**で、
+   * グラフから導ける。別に持つと、グラフと食い違ったときにどちらが本当か分からなくなる。
+   */
+  roots(): ImageEntity[] {
+    return this.listActivities()
+      .filter((a) => a.used.length === 0)
+      .map((a) => this.entities.get(a.generated))
+      .filter((e): e is ImageEntity => e !== undefined)
+  }
+
+  /** その画像が属する会話の根 */
+  rootOf(entity: Iri): Iri | undefined {
+    let current: Iri | undefined = entity
+    const seen = new Set<Iri>()
+    while (current && !seen.has(current)) {
+      seen.add(current)
+      const act = this.activityThatGenerated(current)
+      if (!act) return this.entities.has(current) ? current : undefined
+      if (act.used.length === 0) return current
+      current = act.used[0]
+    }
+    return undefined
+  }
+
+  /** その会話に属する画像を、生まれた順に返す */
+  session(root: Iri): ImageEntity[] {
+    return this.listEntities()
+      .filter((e) => this.rootOf(e.id) === root)
+      .sort((a, b) => {
+        const ta = this.activityThatGenerated(a.id)?.startedAtTime ?? ''
+        const tb = this.activityThatGenerated(b.id)?.startedAtTime ?? ''
+        return ta.localeCompare(tb)
+      })
+  }
+
   /** その画像から直接派生した画像 */
   children(entity: Iri): ImageEntity[] {
     return this.listActivities()
