@@ -1,0 +1,56 @@
+{
+  "@context": {
+    "provision": "https://kumagallium.github.io/PROVision/schema/context.jsonld#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "prompt": {
+      "@id": "provision:prompt",
+      "@type": "xsd:string"
+    },
+    "negativePrompt": {
+      "@id": "provision:negativePrompt",
+      "@type": "xsd:string"
+    },
+    "model": {
+      "@id": "provision:model",
+      "@type": "xsd:string"
+    },
+    "provider": {
+      "@id": "provision:provider",
+      "@type": "xsd:string"
+    },
+    "seed": {
+      "@id": "provision:seed",
+      "@type": "xsd:integer"
+    },
+    "steps": {
+      "@id": "provision:steps",
+      "@type": "xsd:integer"
+    },
+    "guidance": {
+      "@id": "provision:guidance",
+      "@type": "xsd:decimal"
+    },
+    "width": {
+      "@id": "provision:width",
+      "@type": "xsd:integer"
+    },
+    "height": {
+      "@id": "provision:height",
+      "@type": "xsd:integer"
+    },
+    "intent": {
+      "@id": "provision:intent",
+      "@type": "xsd:string"
+    },
+    "imageDigest": {
+      "@id": "provision:imageDigest",
+      "@type": "xsd:string"
+    },
+    "mediaType": {
+      "@id": "provision:mediaType",
+      "@type": "xsd:string"
+    },
+    "fabio": "http://purl.org/spar/fabio/",
+    "dcterms": "http://purl.org/dc/terms/"
+  }
+}

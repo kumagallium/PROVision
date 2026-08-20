@@ -23,7 +23,12 @@ ROOT="$(pwd)"
 [ -f "$DEMO_TTL" ] || { echo "asterism のデモデータが無い: $DEMO_TTL" >&2; exit 1; }
 [ -f "$GRAPH.nt" ] || { echo "グラフが無い: $GRAPH.nt" >&2; exit 1; }
 
-FIGURE="$(cat "$GRAPH.leaf.txt")"
+# 起点は <接頭辞>.leaf.txt。無ければ PROVISION_FIGURE で渡す
+if [ -f "$GRAPH.leaf.txt" ]; then
+  FIGURE="$(cat "$GRAPH.leaf.txt")"
+else
+  FIGURE="${PROVISION_FIGURE:-}"
+fi
 
 rm -rf tmp/store tmp/rdf
 mkdir -p tmp/store tmp/rdf
@@ -36,6 +41,6 @@ docker run --rm -v "$ROOT/tmp:/w" "$IMAGE" \
   load --location /w/store --file /w/rdf/asterism.ttl --file /w/rdf/provision.nt
 
 echo
-echo "== $QUERY （$GRAPH） =="
+echo "== ${QUERY} （${GRAPH}） =="
 docker run --rm -v "$ROOT/tmp:/w" "$IMAGE" \
   query --location /w/store --query-file /w/rdf/query.rq --results-format tsv

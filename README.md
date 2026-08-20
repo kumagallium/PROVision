@@ -181,6 +181,19 @@ git clone https://github.com/kumagallium/asterism ~/develop/asterism
 
 `queries/figure-intents.rq` は「どの指示の連なりで今の形になったか」を返す。
 
+### 掲載を追う
+
+`queries/published-figure.rq` は **「この論文の Figure 2 に載ったのはどの版か。それは何に
+基づいていたか」** に答える。実データでの実行例:
+
+| 図版 | 載った先 | 版 | seed | 参照した曲線 | 物性 |
+|---|---|---|---|---|---|
+| Figure 2 | doi.org/10.1021/ic800772m | ロゴの中のarrは必要？ | 23488044 | 1171-318-665 | ZT |
+
+「載った」は生成の外で起きた事実なので、**後から表明として記録する**。
+生成の記録は書き換えない（[D-008](docs/decisions.md)）。画面では、版を選んで
+「この版の詳細」を開くと、参照と掲載をその場で記録できる。
+
 ## 決めたこと
 
 段階間の契約は [`docs/decisions.md`](docs/decisions.md) にある。要点:

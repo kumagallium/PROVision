@@ -142,6 +142,48 @@ interface GenerateBody {
   label?: string
 }
 
+/**
+ * 「この版はこのデータに基づく」と後から表明する。
+ * 生成の記録は書き換えない（D-008）。
+ */
+app.post('/api/reference', async (c) => {
+  const body = (await c.req.json()) as { entity?: string; referenced?: string[] }
+  try {
+    graph.assertReference({
+      about: String(body.entity ?? ''),
+      referenced: body.referenced ?? [],
+      at: new Date().toISOString(),
+      agents: [(await personAgent()).id],
+    })
+    await persist()
+    return c.json({ graph: toProvJsonLd(graph) })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+/** 「この版が、この論文の Figure N として載った」と表明する */
+app.post('/api/publication', async (c) => {
+  const body = (await c.req.json()) as {
+    entity?: string
+    figureLabel?: string
+    partOf?: string
+  }
+  try {
+    graph.assertPublication({
+      about: String(body.entity ?? ''),
+      figureLabel: String(body.figureLabel ?? ''),
+      partOf: String(body.partOf ?? ''),
+      at: new Date().toISOString(),
+      agents: [(await personAgent()).id],
+    })
+    await persist()
+    return c.json({ graph: toProvJsonLd(graph) })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
 app.post('/api/generate', async (c) => {
   const body = (await c.req.json()) as GenerateBody
   if (!body.intent?.trim() && !body.prompt?.trim()) {

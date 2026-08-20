@@ -132,3 +132,47 @@ cytoscape が例外を投げ、**辺が 1 本も描かれない**（実機で確
 `provision-schema` の URL はまだ実在せず、openprovenance も外部依存になる。
 グラフの形はこちらが完全に決めているので、直接書く方が決定論的でオフラインで動く。
 `@context` を配信し始めたら、後から標準の展開に差し替えてもよい（出力は一致するはず）。
+
+---
+
+## D-008 後から分かったことは、書き換えずに「表明」として足す
+
+**決定**: 生成のあとで分かること——「この版はこのデータに基づく」「この版が Figure 2 として
+載った」——は、**既存の Entity / Activity を書き換えずに、別の `prov:Activity` として記録する**。
+
+```
+表明 Activity
+  prov:used            <対象の画像>
+  prov:used            <外部データ IRI>        ← 参照のとき
+  prov:generated       <fabio:Figure>          ← 掲載のとき
+  prov:wasAssociatedWith <人間 Agent>
+  prov:startedAtTime   <言った時刻>
+```
+
+**なぜ**
+- 不変条件（元の絵を加工しない・記録を書き換えない）をそのまま守れる
+- **「生成時に分かっていたこと」と「後から人が主張したこと」が混ざらない。**
+  いつ・誰が言ったかまで残るので、主張の責任が追える
+- 掲載は世界の側で起きた事実であって、絵が変わったわけではない。
+  Entity に後から属性を足すと、その区別が消える
+
+**生成の Activity と表明の Activity の見分け方**: `provision:prompt` を持つかどうか。
+表明は絵を作らないので prompt が無い。読み戻しはこれで判別する（新しい語彙を足さずに済む）。
+
+**掲載の語彙は FaBiO を使う**（`fabio:Figure`、`http://purl.org/spar/fabio/`）。自作しない。
+図版の IRI は**載った先の識別子から作る**（`{doi}#figure-2`）ので、
+同じ論文の同じ図なら誰が記録しても同じ IRI に収束する。
+
+**捨てたもの**: Entity に `publishedAs` のような属性を後から足すこと。書けてしまうが、
+「いつ誰が言ったか」が消え、生成時の事実と区別できなくなる。
+
+---
+
+## D-009 `@context` は自分で配信する
+
+**決定**: `provision` の `@context` を **GitHub Pages（`docs/schema/context.jsonld`）で実際に配信する**。
+IRI も `https://kumagallium.github.io/PROVision/schema/context.jsonld#` に揃えた。
+
+**なぜ**: 実在しない URL を書いておくと、JSON-LD を素直に展開する側（他のツール、
+将来の自分）が 404 を踏む。D-007 で自前 N-Triples にして回避してはいるが、
+**それは出口の都合であって、書き出したファイルが嘘をついてよい理由にはならない。**

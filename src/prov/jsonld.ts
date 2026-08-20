@@ -7,11 +7,21 @@
  * （wasDerivedFrom / wasGeneratedBy / used / wasAssociatedWith）も持たせる。
  * 前者は prov-jsonld-viz が辺を描くため、後者は SPARQL が素直に書けるため。
  */
-import type { GenerationActivity, ImageEntity, ProvAgent, ProvGraphData } from './types.js'
+import type {
+  AssertionActivity,
+  GenerationActivity,
+  ImageEntity,
+  ProvAgent,
+  ProvGraphData,
+} from './types.js'
 import { ProvGraph } from './graph.js'
 
+/**
+ * 拡張語彙の @context。**GitHub Pages で実際に配信している**（`docs/schema/`）。
+ * 実在しない URL を書いておくと、JSON-LD を素直に展開する側が 404 を踏む。
+ */
 export const PROVISION_CONTEXT_URL =
-  'https://kumagallium.github.io/provision-schema/context.jsonld'
+  'https://kumagallium.github.io/PROVision/schema/context.jsonld'
 
 export const PROV_JSONLD_CONTEXT_URL =
   'https://openprovenance.org/prov-jsonld/context.jsonld'
@@ -146,8 +156,45 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
 
   for (const a of data.activities) nodes.push(activityNode(a))
 
+  // 後から人が表明したこと（D-008）。生成の Activity と同じ prov:Activity だが、
+  // provision:prompt を持たないことで読み戻し時に区別できる
+  for (const a of data.assertions ?? []) {
+    nodes.push({
+      '@id': a.id,
+      '@type': 'Activity',
+      label: lit(a.label),
+      'provision:assertionAbout': refs([a.about]) as unknown as JsonValue,
+      startedAtTime: lit(a.startedAtTime, `${XSD}dateTime`),
+      used: refs([a.about, ...a.referenced]),
+      ...(a.wasAssociatedWith.length > 0
+        ? { wasAssociatedWith: refs(a.wasAssociatedWith) }
+        : {}),
+    })
+    if (a.figure) {
+      nodes.push({
+        '@id': a.figure.id,
+        '@type': ['Entity', 'fabio:Figure'] as unknown as JsonValue,
+        label: lit(a.figure.label),
+        'dcterms:identifier': lit(a.figure.label),
+        'dcterms:isPartOf': refs([a.figure.partOf]),
+        wasGeneratedBy: refs([a.id]),
+        // 載った図版は、その版の画像から出てきたもの。ここは派生で正しい
+        wasDerivedFrom: refs([a.about]),
+      })
+    }
+  }
+
   // 関係は実体ノードとしても並べる（viz が辺を描くのはこちら）。
   // @id は付けない。付けると viz が関係そのものを孤立ノードとして描いてしまう
+  for (const a of data.assertions ?? []) {
+    for (const used of [a.about, ...a.referenced]) {
+      nodes.push({ '@type': 'Usage', activity: a.id, entity: used })
+    }
+    if (a.figure) {
+      nodes.push({ '@type': 'Generation', activity: a.id, entity: a.figure.id })
+    }
+  }
+
   for (const a of data.activities) {
     for (const used of [...a.used, ...a.referenced]) {
       nodes.push({ '@type': 'Usage', activity: a.id, entity: used })
@@ -177,6 +224,8 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
   const entities: ImageEntity[] = []
   const agents: ProvAgent[] = []
   const activityNodes: JsonLdNode[] = []
+  /** 掲載された figure。どの表明が生んだかで引けるようにしておく */
+  const figureByActivity = new Map<string, { id: string; label: string; partOf: string }>()
 
   for (const n of nodes) {
     const t = typeOf(n)
@@ -184,6 +233,19 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
     if (!id) continue
 
     if (t === 'Entity') {
+      const types = Array.isArray(n['@type']) ? (n['@type'] as unknown[]) : [n['@type']]
+      if (types.includes('fabio:Figure')) {
+        const by = idList(n, 'wasGeneratedBy')[0]
+        const partOf = idList(n, 'dcterms:isPartOf')[0]
+        if (by && partOf) {
+          figureByActivity.set(by, {
+            id,
+            label: String(firstValue(n, 'label') ?? id),
+            partOf,
+          })
+        }
+        continue
+      }
       // 外部リソースのノードには imageDigest が無い。こちらの画像ではないので取り込まない
       if (firstValue(n, 'provision:imageDigest') === undefined) continue
       entities.push({
@@ -226,7 +288,31 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
   // それ以外は人間が参照した外部リソース
   const localEntities = new Set(entities.map((e) => e.id))
 
-  const activities: GenerationActivity[] = activityNodes.map((n) => {
+  // provision:prompt を持たない Activity は「後から人が表明したこと」（D-008）
+  const assertions: AssertionActivity[] = activityNodes
+    .filter((n) => firstValue(n, 'provision:prompt') === undefined)
+    .map((n) => {
+      const id = n['@id'] as string
+      const about = idList(n, 'provision:assertionAbout')[0] ?? idList(n, 'used')[0] ?? ''
+      const referenced = idList(n, 'used')
+        .filter((iri) => iri !== about)
+        .sort()
+      const figure = figureByActivity.get(id)
+      return {
+        id,
+        kind: (figure ? 'publication' : 'reference') as AssertionActivity['kind'],
+        label: String(firstValue(n, 'label') ?? id),
+        about,
+        referenced,
+        ...(figure ? { figure } : {}),
+        startedAtTime: String(firstValue(n, 'startedAtTime') ?? ''),
+        wasAssociatedWith: idList(n, 'wasAssociatedWith').slice().sort(),
+      }
+    })
+
+  const activities: GenerationActivity[] = activityNodes
+    .filter((n) => firstValue(n, 'provision:prompt') !== undefined)
+    .map((n) => {
     const id = n['@id'] as string
     const generated = generatedBy.get(id) ?? ''
     const usedAll = idList(n, 'used')
@@ -260,8 +346,8 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
       generated,
       wasAssociatedWith: idList(n, 'wasAssociatedWith').slice().sort(),
     }
-  })
+    })
 
-  const data: ProvGraphData = { base, entities, activities, agents }
+  const data: ProvGraphData = { base, entities, activities, assertions, agents }
   return ProvGraph.from(data)
 }

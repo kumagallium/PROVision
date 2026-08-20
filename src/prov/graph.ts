@@ -6,13 +6,23 @@
  *   - 再実行に要る情報が欠けた記録は受け付けない
  */
 import type {
+  AssertionActivity,
   GenerationActivity,
   ImageEntity,
   Iri,
   ProvAgent,
   ProvGraphData,
+  PublishedFigure,
 } from './types.js'
-import { DEFAULT_BASE, activityIri, agentIri, imageIri, sha256 } from './iri.js'
+import {
+  DEFAULT_BASE,
+  activityIri,
+  agentIri,
+  assertionIri,
+  figureIri,
+  imageIri,
+  sha256,
+} from './iri.js'
 
 export class ReproducibilityError extends Error {
   constructor(missing: string[]) {
@@ -61,6 +71,7 @@ export class ProvGraph {
   readonly base: string
   private readonly entities = new Map<Iri, ImageEntity>()
   private readonly activities = new Map<Iri, GenerationActivity>()
+  private readonly assertions = new Map<Iri, AssertionActivity>()
   private readonly agents = new Map<Iri, ProvAgent>()
 
   constructor(base: string = DEFAULT_BASE) {
@@ -72,6 +83,7 @@ export class ProvGraph {
     for (const a of data.agents) g.agents.set(a.id, a)
     for (const e of data.entities) g.entities.set(e.id, e)
     for (const act of data.activities) g.activities.set(act.id, act)
+    for (const a of data.assertions ?? []) g.assertions.set(a.id, a)
     return g
   }
 
@@ -81,6 +93,7 @@ export class ProvGraph {
       agents: [...this.agents.values()],
       entities: [...this.entities.values()],
       activities: [...this.activities.values()],
+      assertions: [...this.assertions.values()],
     }
   }
 
@@ -243,6 +256,97 @@ export class ProvGraph {
         const tb = this.activityThatGenerated(b.id)?.startedAtTime ?? ''
         return ta.localeCompare(tb)
       })
+  }
+
+  listAssertions(): AssertionActivity[] {
+    return [...this.assertions.values()]
+  }
+
+  /**
+   * 「この版はこのデータに基づく」と後から表明する。
+   *
+   * 生成時の記録は書き換えない。**いつ・誰が言ったか**ごと別の Activity に残す（D-008）。
+   * 画像生成モデルがデータを読んだわけではないので、ここでも `wasDerivedFrom` は張らない。
+   */
+  assertReference(input: {
+    about: Iri
+    referenced: Iri[]
+    at: string
+    agents?: Iri[]
+  }): AssertionActivity {
+    if (!this.entities.has(input.about)) {
+      throw new Error(`その版がグラフに無い: ${input.about}`)
+    }
+    const referenced = [...new Set(input.referenced.map((r) => r.trim()).filter(Boolean))].sort()
+    if (referenced.length === 0) throw new Error('参照する IRI がありません')
+
+    const id = assertionIri(this.base, `reference ${input.about} ${referenced.join('|')}`)
+    const assertion: AssertionActivity = {
+      id,
+      kind: 'reference',
+      label: `参照の表明（${referenced.length} 件）`,
+      about: input.about,
+      referenced,
+      startedAtTime: input.at,
+      wasAssociatedWith: [...(input.agents ?? [])].sort(),
+    }
+    this.assertions.set(id, assertion)
+    return assertion
+  }
+
+  /** 「この版が、この論文の Figure N として載った」と表明する */
+  assertPublication(input: {
+    about: Iri
+    /** 掲載時の呼び名。"Figure 2" など */
+    figureLabel: string
+    /** 載った先。DOI や URL */
+    partOf: Iri
+    at: string
+    agents?: Iri[]
+  }): AssertionActivity {
+    if (!this.entities.has(input.about)) {
+      throw new Error(`その版がグラフに無い: ${input.about}`)
+    }
+    const partOf = input.partOf.trim()
+    const label = input.figureLabel.trim()
+    if (!partOf || !label) throw new Error('掲載先と図版の呼び名が要ります')
+
+    const figure: PublishedFigure = { id: figureIri(partOf, label), label, partOf }
+    const id = assertionIri(this.base, `publication ${input.about} ${figure.id}`)
+    const assertion: AssertionActivity = {
+      id,
+      kind: 'publication',
+      label: `掲載の表明（${label}）`,
+      about: input.about,
+      referenced: [],
+      figure,
+      startedAtTime: input.at,
+      wasAssociatedWith: [...(input.agents ?? [])].sort(),
+    }
+    this.assertions.set(id, assertion)
+    return assertion
+  }
+
+  /**
+   * その版が基づく外部データ。系譜をさかのぼって集める。
+   * 生成時に指定したものと、後から表明したものの両方。
+   */
+  referencesOf(entity: Iri): Iri[] {
+    const chain = this.lineage(entity)
+    const fromGeneration = chain.flatMap((a) => a.referenced)
+    const onPath = new Set(chain.map((a) => a.generated))
+    onPath.add(entity)
+    const fromAssertion = this.listAssertions()
+      .filter((a) => a.kind === 'reference' && onPath.has(a.about))
+      .flatMap((a) => a.referenced)
+    return [...new Set([...fromGeneration, ...fromAssertion])].sort()
+  }
+
+  /** その版が載った figure。無ければ空 */
+  publicationsOf(entity: Iri): PublishedFigure[] {
+    return this.listAssertions()
+      .filter((a) => a.kind === 'publication' && a.about === entity && a.figure)
+      .map((a) => a.figure!)
   }
 
   /** その画像から直接派生した画像 */

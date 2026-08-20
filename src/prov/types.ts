@@ -56,6 +56,37 @@ export interface GenerationActivity extends ReproducibleSpec {
   wasAssociatedWith: Iri[]
 }
 
+/**
+ * 人が、既存の版について**後から表明したこと**。絵は作らない。
+ *
+ * 既存の Entity や Activity を書き換えずに済ませるための形（D-008）。
+ * 「生成時に分かっていた事実」と「後から人が主張したこと」を混ぜないために、
+ * 別の Activity として、いつ・誰が言ったのかごと記録する。
+ */
+export interface AssertionActivity {
+  id: Iri
+  /** reference: このデータに基づく / publication: この figure として載った */
+  kind: 'reference' | 'publication'
+  label: string
+  /** 何についての表明か。画像 Entity の IRI */
+  about: Iri
+  /** kind === 'reference' のとき。参照した外部リソース */
+  referenced: Iri[]
+  /** kind === 'publication' のとき。載った先 */
+  figure?: PublishedFigure
+  startedAtTime: string
+  wasAssociatedWith: Iri[]
+}
+
+/** 論文などに載った図版。fabio:Figure として書き出す */
+export interface PublishedFigure {
+  id: Iri
+  /** 掲載時の呼び名。"Figure 2" など */
+  label: string
+  /** 載った先。DOI や URL */
+  partOf: Iri
+}
+
 export type AgentKind = 'SoftwareAgent' | 'Person' | 'Organization'
 
 export interface ProvAgent {
@@ -69,5 +100,7 @@ export interface ProvGraphData {
   base: string
   entities: ImageEntity[]
   activities: GenerationActivity[]
+  /** 後から人が表明したこと。古いファイルには無いので省略可 */
+  assertions?: AssertionActivity[]
   agents: ProvAgent[]
 }

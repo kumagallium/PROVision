@@ -41,7 +41,7 @@ export function DetailPanel({
   const activity = graph.activityThatGenerated(entityId)
   if (!entity || !activity) return null
 
-  const referenced = [...new Set(graph.lineage(entityId).flatMap((a) => a.referenced))]
+  const published = graph.publicationsOf(entityId)
 
   return (
     <div>
@@ -58,13 +58,11 @@ export function DetailPanel({
         ].join('\n')}
       </code>
 
-      {referenced.length > 0 ? (
+      {published.length > 0 ? (
         <>
-          <h3 style={H}>この版が基づく外部データ</h3>
-          {referenced.map((iri) => (
-            <code key={iri} style={CODE}>
-              {iri}
-            </code>
+          <h3 style={H}>掲載</h3>
+          {published.map((f) => (
+            <code key={f.id} style={CODE}>{`${f.label}\n${f.partOf}`}</code>
           ))}
         </>
       ) : null}

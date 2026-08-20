@@ -20,3 +20,20 @@ export function activityIri(base: string, key: string): string {
 export function agentIri(base: string, slug: string): string {
   return `${base}/agent/${slug}`
 }
+
+export function assertionIri(base: string, key: string): string {
+  return `${base}/assertion/${sha256(key).slice(0, 32)}`
+}
+
+/**
+ * 掲載された図版の IRI。**載った先の識別子から作る**（こちらで採番しない）。
+ * 同じ論文の同じ図なら、誰が記録しても同じ IRI に収束する。
+ */
+export function figureIri(partOf: string, label: string): string {
+  const slug = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+  return `${partOf.replace(/#.*$/, '')}#${slug || 'figure'}`
+}

@@ -1,7 +1,7 @@
 # 「この図版は、どの指示の連なりでこうなったか」
 PREFIX prov:      <http://www.w3.org/ns/prov#>
 PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX provision: <https://kumagallium.github.io/provision-schema/releases/1.0/context.jsonld#>
+PREFIX provision: <https://kumagallium.github.io/PROVision/schema/context.jsonld#>
 
 SELECT ?時刻 ?版 ?指示 ?seed
 WHERE {

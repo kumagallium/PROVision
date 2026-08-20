@@ -2,15 +2,15 @@
  * N-Triples への書き出し。asterism（Oxigraph）に載せるための出口。
  *
  * JSON-LD ライブラリで展開する手も考えたが、@context をネットワークから取りに行く。
- * provision-schema の URL はまだ実在せず、openprovenance も外部依存になる。
  * グラフの形は完全にこちらが決めているので、素の PROV の IRI を直接書く方が
  * 決定論的で、テストしやすく、オフラインで動く。
  */
 import type { ProvGraph } from './graph.js'
 
 const PROV = 'http://www.w3.org/ns/prov#'
-const PROVISION =
-  'https://kumagallium.github.io/provision-schema/releases/1.0/context.jsonld#'
+const PROVISION = 'https://kumagallium.github.io/PROVision/schema/context.jsonld#'
+const FABIO = 'http://purl.org/spar/fabio/'
+const DCTERMS = 'http://purl.org/dc/terms/'
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#'
 const XSD = 'http://www.w3.org/2001/XMLSchema#'
@@ -93,6 +93,30 @@ export function toNTriples(graph: ProvGraph): string[] {
       triple(s, iri(`${PROV}wasAssociatedWith`), iri(agent))
     }
     triple(iri(a.generated), iri(`${PROV}wasGeneratedBy`), iri(a.id))
+  }
+
+  // 後から人が表明したこと（D-008）。生成の記録とは別の Activity として書く
+  for (const a of graph.listAssertions()) {
+    const s = iri(a.id)
+    triple(s, iri(`${RDF}type`), iri(`${PROV}Activity`))
+    triple(s, iri(`${RDFS}label`), literal(a.label))
+    triple(s, iri(`${PROV}startedAtTime`), literal(a.startedAtTime, `${XSD}dateTime`))
+    triple(s, iri(`${PROV}used`), iri(a.about))
+    for (const ref of a.referenced) triple(s, iri(`${PROV}used`), iri(ref))
+    for (const agent of a.wasAssociatedWith) {
+      triple(s, iri(`${PROV}wasAssociatedWith`), iri(agent))
+    }
+    if (a.figure) {
+      const f = iri(a.figure.id)
+      triple(f, iri(`${RDF}type`), iri(`${PROV}Entity`))
+      triple(f, iri(`${RDF}type`), iri(`${FABIO}Figure`))
+      triple(f, iri(`${RDFS}label`), literal(a.figure.label))
+      triple(f, iri(`${DCTERMS}identifier`), literal(a.figure.label))
+      triple(f, iri(`${DCTERMS}isPartOf`), iri(a.figure.partOf))
+      triple(f, iri(`${PROV}wasGeneratedBy`), s)
+      // 載った図版は、その版の画像から出てきたもの。ここは派生で正しい
+      triple(f, iri(`${PROV}wasDerivedFrom`), iri(a.about))
+    }
   }
 
   return [...new Set(out)].sort()

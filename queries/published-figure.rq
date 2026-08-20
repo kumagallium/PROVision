@@ -1,0 +1,34 @@
+# 「この論文の Figure 2 に載ったのはどの版か。それは何に基づいていたか」
+#
+# 監査の問い。履歴一覧では原理的に答えられない——「載った」という事実は
+# 生成の外で起きたことなので、あとから表明として記録するしかない（D-008）。
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX dcterms:   <http://purl.org/dc/terms/>
+PREFIX fabio:     <http://purl.org/spar/fabio/>
+PREFIX sd:        <https://kumagallium.github.io/asterism/starrydata/ontology#>
+PREFIX schema:    <https://schema.org/>
+PREFIX provision: <https://kumagallium.github.io/PROVision/schema/context.jsonld#>
+
+SELECT ?図版 ?載った先 ?版 ?seed ?参照した曲線 ?物性 ?論文
+WHERE {
+  ?figure a fabio:Figure ;
+          dcterms:identifier ?図版 ;
+          dcterms:isPartOf ?載った先 ;
+          prov:wasDerivedFrom ?image .
+
+  ?image rdfs:label ?版 ;
+         prov:wasGeneratedBy ?gen .
+  ?gen provision:seed ?seed .
+
+  # その版に至るまでのどこかで、著者が参照したデータ
+  OPTIONAL {
+    ?image prov:wasDerivedFrom* ?ancestor .
+    ?assert prov:used ?ancestor ;
+            prov:used ?curve .
+    ?curve a sd:Curve ;
+           dcterms:identifier ?参照した曲線 ;
+           sd:propertyY ?物性 ;
+           sd:ofSample/sd:fromPaper/schema:name ?論文 .
+  }
+}

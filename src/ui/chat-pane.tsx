@@ -14,6 +14,7 @@ import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { imageUrlOf } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
 import { DetailPanel } from './detail-panel.js'
+import { AssertPanel } from './assert-panel.js'
 import { ProvImage } from './prov-image.js'
 import { apiFetch } from './api-base.js'
 
@@ -131,9 +132,10 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         {current && chain.length > 0 ? (
           <details style={{ marginTop: 4 }}>
             <summary style={{ fontSize: 12, color: '#5c6b73', cursor: 'pointer' }}>
-              この版の詳細（再実行に要る情報・基づく外部データ）
+              この版の詳細（再実行に要る情報・基づくデータ・掲載）
             </summary>
             <DetailPanel graph={graph} entityId={current} />
+            <AssertPanel graph={graph} entityId={current} onGraph={onGraph} />
           </details>
         ) : null}
 
