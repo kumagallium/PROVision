@@ -10,6 +10,10 @@
       "@id": "provision:negativePrompt",
       "@type": "xsd:string"
     },
+    "imageStrength": {
+      "@id": "provision:imageStrength",
+      "@type": "xsd:decimal"
+    },
     "model": {
       "@id": "provision:model",
       "@type": "xsd:string"

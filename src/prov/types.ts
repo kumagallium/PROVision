@@ -42,6 +42,8 @@ export interface GenerationActivity extends ReproducibleSpec {
   /** 利用者が出した自然言語の指示。辺ではなく Activity に置く（D-003） */
   intent?: string
   negativePrompt?: string
+  /** image-to-image で親画像をどれだけ残したか */
+  imageStrength?: number
   provider?: string
   steps?: number
   guidance?: number

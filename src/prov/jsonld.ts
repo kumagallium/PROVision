@@ -108,6 +108,7 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     'provision:seed': lit(a.seed, `${XSD}integer`),
     ...(a.intent ? { 'provision:intent': lit(a.intent) } : {}),
     ...(a.negativePrompt ? { 'provision:negativePrompt': lit(a.negativePrompt) } : {}),
+    ...optionalNumber('provision:imageStrength', a.imageStrength, `${XSD}decimal`),
     ...(a.provider ? { 'provision:provider': lit(a.provider) } : {}),
     ...optionalNumber('provision:steps', a.steps, `${XSD}integer`),
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
@@ -341,6 +342,9 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(str(n, 'provision:negativePrompt') !== undefined
         ? { negativePrompt: str(n, 'provision:negativePrompt')! }
+        : {}),
+      ...(num(n, 'provision:imageStrength') !== undefined
+        ? { imageStrength: num(n, 'provision:imageStrength')! }
         : {}),
       ...(str(n, 'provision:provider') !== undefined
         ? { provider: str(n, 'provision:provider')! }

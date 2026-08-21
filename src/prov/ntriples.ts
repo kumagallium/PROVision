@@ -77,11 +77,16 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (a.provider) triple(s, iri(`${PROVISION}provider`), literal(a.provider))
     for (const [key, value] of [
       ['steps', a.steps],
+      ['imageStrength', a.imageStrength],
       ['width', a.width],
       ['height', a.height],
     ] as const) {
       if (value !== undefined) {
-        triple(s, iri(`${PROVISION}${key}`), literal(value, `${XSD}integer`))
+        triple(
+          s,
+          iri(`${PROVISION}${key}`),
+          literal(value, key === 'imageStrength' ? `${XSD}decimal` : `${XSD}integer`),
+        )
       }
     }
     if (a.guidance !== undefined) {

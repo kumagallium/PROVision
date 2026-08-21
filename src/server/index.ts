@@ -17,12 +17,14 @@ import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
 import { cacheKeyOf, generateImage, modelIdOf, resolveImageCommand } from '../image/mflux.js'
 import { imageContentDigest } from '../image/png.js'
+import { promptForImageGeneration } from '../image/prompt.js'
 
 const DATA_DIR = resolve(process.env.PROVISION_DATA_DIR ?? 'data/run')
 const IMAGE_DIR = join(DATA_DIR, 'images')
 const CACHE_DIR = join(DATA_DIR, 'cache')
 const GRAPH_PATH = join(DATA_DIR, 'lineage.jsonld')
 const PORT = Number(process.env.PROVISION_PORT ?? 8788)
+const IMAGE_EDIT_STRENGTH = 0.3
 
 await mkdir(IMAGE_DIR, { recursive: true })
 await mkdir(CACHE_DIR, { recursive: true })
@@ -70,6 +72,27 @@ async function personAgent() {
     identity.name.trim() || identity.email.trim() || '名乗っていない利用者',
     'Person',
   )
+}
+
+interface SourceImage {
+  path: string
+  digest: string
+}
+
+function sourceImageOf(entityId: string): SourceImage {
+  const entity = graph.getEntity(entityId)
+  if (!entity?.location) {
+    throw new Error(`親画像のファイル場所が記録されていない: ${entityId}`)
+  }
+  const name = entity.location.split('/').pop()
+  if (!name || !/^[0-9a-f]{8,64}\.png$/.test(name)) {
+    throw new Error(`親画像のファイル場所が不正: ${entity.location}`)
+  }
+  const path = join(IMAGE_DIR, name)
+  if (!existsSync(path)) {
+    throw new Error(`親画像のファイルが見つからない: ${path}`)
+  }
+  return { path, digest: entity.digest }
 }
 
 /**
@@ -237,12 +260,20 @@ app.post('/api/rerun', async (c) => {
 
   try {
     const result = await serial(async () => {
+      const source = original.used.length > 0 ? sourceImageOf(original.used[0]!) : undefined
       const generated = await generateImage({
         prompt: original.prompt,
         seed: original.seed,
         ...(original.width !== undefined ? { width: original.width } : {}),
         ...(original.height !== undefined ? { height: original.height } : {}),
         ...(original.steps !== undefined ? { steps: original.steps } : {}),
+        ...(source
+          ? {
+              imagePath: source.path,
+              imageDigest: source.digest,
+              imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH,
+            }
+          : {}),
       })
       const digest = imageContentDigest(generated.png)
       const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
@@ -260,6 +291,7 @@ app.post('/api/rerun', async (c) => {
         ...(original.steps !== undefined ? { steps: original.steps } : {}),
         ...(original.width !== undefined ? { width: original.width } : {}),
         ...(original.height !== undefined ? { height: original.height } : {}),
+        ...(source ? { imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH } : {}),
         startedAtTime: generated.startedAtTime,
         endedAtTime: generated.endedAtTime,
         intent: match ? '再実行（一致）' : '再実行（食い違い）',
@@ -290,19 +322,30 @@ app.post('/api/generate', async (c) => {
     return c.json({ error: `その版はグラフにありません: ${body.parent}` }, 400)
   }
 
-  // 分岐元があるなら、そのプロンプトに指示を足す。無ければ指示そのものを使う
-  const prompt =
-    body.prompt?.trim() ||
-    (parentActivity ? `${parentActivity.prompt}, ${body.intent}` : body.intent)
-  const seed = Number.isInteger(body.seed)
-    ? body.seed!
-    : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
-      Number.parseInt(sha256(`${prompt}${Date.now()}`).slice(0, 8), 16) % 2 ** 31
-
   try {
+    const source = body.parent ? sourceImageOf(body.parent) : undefined
+    const instruction = body.intent?.trim() || body.prompt?.trim() || ''
+    // 親画像を入力できるときは、親の全文プロンプトを次へ持ち越さない。
+    const prompt =
+      body.prompt?.trim() ||
+      promptForImageGeneration(parentActivity?.prompt, instruction, Boolean(source))
+    const seed = Number.isInteger(body.seed)
+      ? body.seed!
+      : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
+        Number.parseInt(sha256(`${prompt}${Date.now()}`).slice(0, 8), 16) % 2 ** 31
+
     const entity = await serial(async () => {
       const model = modelIdOf(resolveImageCommand())
-      const key = cacheKeyOf({ prompt, seed }, model)
+      const key = cacheKeyOf(
+        {
+          prompt,
+          seed,
+          ...(source
+            ? { imageDigest: source.digest, imageStrength: IMAGE_EDIT_STRENGTH }
+            : {}),
+        },
+        model,
+      )
       const cachedPng = join(CACHE_DIR, `${key}.png`)
       const cachedMeta = join(CACHE_DIR, `${key}.json`)
 
@@ -317,7 +360,17 @@ app.post('/api/generate', async (c) => {
         const meta = JSON.parse(await readFile(cachedMeta, 'utf8'))
         result = { ...meta, png: new Uint8Array(await readFile(cachedPng)) }
       } else {
-        result = await generateImage({ prompt, seed })
+        result = await generateImage({
+          prompt,
+          seed,
+          ...(source
+            ? {
+                imagePath: source.path,
+                imageDigest: source.digest,
+                imageStrength: IMAGE_EDIT_STRENGTH,
+              }
+            : {}),
+        })
         await writeFile(cachedPng, result.png)
         await writeFile(
           cachedMeta,
@@ -341,7 +394,7 @@ app.post('/api/generate', async (c) => {
       await writeFile(path, result.png)
 
       const recorded = graph.recordGeneration({
-        image: result.png,
+        image: { digest },
         label: body.label?.trim() || body.intent || '無題',
         location: `images/${digest.slice(0, 16)}.png`,
         prompt,
@@ -351,6 +404,7 @@ app.post('/api/generate', async (c) => {
         steps: 8,
         width: 1024,
         height: 1024,
+        ...(source ? { imageStrength: IMAGE_EDIT_STRENGTH } : {}),
         startedAtTime: result.startedAtTime,
         endedAtTime: result.endedAtTime,
         ...(body.intent?.trim() ? { intent: body.intent } : {}),

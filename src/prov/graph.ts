@@ -60,6 +60,7 @@ export interface RecordGenerationInput {
 
   intent?: string
   negativePrompt?: string
+  imageStrength?: number
   provider?: string
   steps?: number
   guidance?: number
@@ -198,6 +199,7 @@ export class ProvGraph {
       endedAtTime: input.endedAtTime,
       ...(input.intent ? { intent: input.intent } : {}),
       ...(input.negativePrompt ? { negativePrompt: input.negativePrompt } : {}),
+      ...(input.imageStrength !== undefined ? { imageStrength: input.imageStrength } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.steps !== undefined ? { steps: input.steps } : {}),
       ...(input.guidance !== undefined ? { guidance: input.guidance } : {}),

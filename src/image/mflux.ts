@@ -22,6 +22,11 @@ export interface GenerateInput {
   width?: number
   height?: number
   steps?: number
+  /** image-to-image の入力画像。{image} を含むコマンドでのみ有効 */
+  imagePath?: string
+  /** 入力画像の内容ハッシュ。キャッシュ鍵に使う */
+  imageDigest?: string
+  imageStrength?: number
 }
 
 export interface GenerateResult {
@@ -47,6 +52,8 @@ export function cacheKeyOf(input: GenerateInput, model: string): string {
       String(input.width ?? 1024),
       String(input.height ?? 1024),
       String(input.steps ?? 8),
+      input.imageDigest ?? input.imagePath ?? '',
+      String(input.imageStrength ?? ''),
       model,
     ].join('\u0000'),
   ).slice(0, 32)
@@ -56,7 +63,8 @@ export function cacheKeyOf(input: GenerateInput, model: string): string {
  * この Mac で使える既定コマンド。量子化済みの z-image-turbo が無ければ null。
  * 環境変数 PROVISION_IMAGE_COMMAND があればそちらが優先される。
  *
- * テンプレートは {promptFile} {seed} {width} {height} {steps} {out} を差し替える。
+ * テンプレートは {promptFile} {seed} {width} {height} {steps} {image}
+ * {imageStrength} {out} を差し替える。{image} は親画像を編集するときだけ使う。
  */
 export function suggestImageCommand(): string | null {
   const bin = join(homedir(), '.local', 'bin', 'mflux-generate-z-image-turbo')
@@ -71,6 +79,7 @@ export function suggestImageCommand(): string | null {
     '--width {width}',
     '--height {height}',
     '--steps {steps}',
+    '--image {image} {imageStrength}',
     '--output {out}',
   ].join(' ')
 }
@@ -102,6 +111,19 @@ export async function generateImage(input: GenerateInput): Promise<GenerateResul
   const width = input.width ?? 1024
   const height = input.height ?? 1024
   const steps = input.steps ?? 8
+  const imageStrength = input.imageStrength ?? 0.3
+  const hasImagePlaceholder = template.includes('{image}')
+  const canInjectMfluxImage = template.includes('mflux-generate')
+
+  if (input.imagePath && !hasImagePlaceholder && !canInjectMfluxImage) {
+    throw new Error(
+      '親画像を編集するには画像入力に対応したコマンドが要る。' +
+        'テンプレートへ --image {image} を追加する',
+    )
+  }
+  if (input.imagePath && !existsSync(input.imagePath)) {
+    throw new Error(`編集元の画像が見つからない: ${input.imagePath}`)
+  }
 
   const dir = await mkdtemp(join(tmpdir(), 'provision-'))
   const out = join(dir, 'image.png')
@@ -116,8 +138,40 @@ export async function generateImage(input: GenerateInput): Promise<GenerateResul
       .replaceAll('{width}', String(width))
       .replaceAll('{height}', String(height))
       .replaceAll('{steps}', String(steps))
+      .replaceAll('{image}', input.imagePath ?? '')
+      .replaceAll('{imageStrength}', String(imageStrength))
 
-  const [bin, ...args] = template.trim().split(/\s+/).map(fill)
+  const templateArgs = template.trim().split(/\s+/)
+  const args: string[] = []
+  for (let i = 0; i < templateArgs.length; i += 1) {
+    const arg = templateArgs[i]!
+    if (!input.imagePath && arg === '--image' && templateArgs[i + 1] === '{image}') {
+      i += 1
+      if (templateArgs[i + 1] === '{imageStrength}') i += 1
+      continue
+    }
+    if (
+      !input.imagePath &&
+      arg === '--image-path' &&
+      templateArgs[i + 1] === '{image}'
+    ) {
+      i += 1
+      continue
+    }
+    if (
+      !input.imagePath &&
+      arg === '--image-strength' &&
+      templateArgs[i + 1] === '{imageStrength}'
+    ) {
+      i += 1
+      continue
+    }
+    args.push(fill(arg))
+  }
+  const [bin] = args.splice(0, 1)
+  if (input.imagePath && !hasImagePlaceholder) {
+    args.push('--image', input.imagePath, String(imageStrength))
+  }
   const startedAtTime = new Date().toISOString()
   try {
     await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024 })

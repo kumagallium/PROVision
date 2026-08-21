@@ -47,6 +47,11 @@ pnpm tsx scripts/generate-lineage.ts
 生成は直列で 1 枚 2〜3 分。途中で落ちても `data/run/cache/` から続きを走る
 （キャッシュ鍵は prompt / seed / steps / サイズ / モデル＝再現に要る情報そのもの）。
 
+画面で親画像を選んで指示すると、親画像を `--image` の入力にした image-to-image
+編集として実行する。`PROVISION_IMAGE_COMMAND` で独自コマンドを使う場合は、
+テンプレートに `{image}` と `{imageStrength}` を置く。mflux の場合は
+`--image {image} {imageStrength}` の形式を使う（`--image-strength` との併用は不可）。
+
 ## 画面
 
 ```bash
