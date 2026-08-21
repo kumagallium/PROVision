@@ -44,6 +44,9 @@ export interface GenerationActivity extends ReproducibleSpec {
   negativePrompt?: string
   /** image-to-image で親画像をどれだけ残したか */
   imageStrength?: number
+  /** 編集範囲を反映した入力画像の内容ハッシュと保存場所 */
+  conditioningImageDigest?: string
+  conditioningImageLocation?: string
   provider?: string
   steps?: number
   guidance?: number

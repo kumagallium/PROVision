@@ -109,6 +109,12 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     ...(a.intent ? { 'provision:intent': lit(a.intent) } : {}),
     ...(a.negativePrompt ? { 'provision:negativePrompt': lit(a.negativePrompt) } : {}),
     ...optionalNumber('provision:imageStrength', a.imageStrength, `${XSD}decimal`),
+    ...(a.conditioningImageDigest
+      ? { 'provision:conditioningImageDigest': lit(a.conditioningImageDigest) }
+      : {}),
+    ...(a.conditioningImageLocation
+      ? { 'provision:conditioningImageLocation': lit(a.conditioningImageLocation) }
+      : {}),
     ...(a.provider ? { 'provision:provider': lit(a.provider) } : {}),
     ...optionalNumber('provision:steps', a.steps, `${XSD}integer`),
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
@@ -345,6 +351,12 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(num(n, 'provision:imageStrength') !== undefined
         ? { imageStrength: num(n, 'provision:imageStrength')! }
+        : {}),
+      ...(str(n, 'provision:conditioningImageDigest') !== undefined
+        ? { conditioningImageDigest: str(n, 'provision:conditioningImageDigest')! }
+        : {}),
+      ...(str(n, 'provision:conditioningImageLocation') !== undefined
+        ? { conditioningImageLocation: str(n, 'provision:conditioningImageLocation')! }
         : {}),
       ...(str(n, 'provision:provider') !== undefined
         ? { provider: str(n, 'provision:provider')! }

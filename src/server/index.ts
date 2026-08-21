@@ -25,6 +25,7 @@ const CACHE_DIR = join(DATA_DIR, 'cache')
 const GRAPH_PATH = join(DATA_DIR, 'lineage.jsonld')
 const PORT = Number(process.env.PROVISION_PORT ?? 8788)
 const IMAGE_EDIT_STRENGTH = 0.3
+const MAX_CONDITIONING_IMAGE_BYTES = 12 * 1024 * 1024
 
 await mkdir(IMAGE_DIR, { recursive: true })
 await mkdir(CACHE_DIR, { recursive: true })
@@ -79,20 +80,49 @@ interface SourceImage {
   digest: string
 }
 
+function imageFileOf(location: string, digest: string): SourceImage {
+  const name = location.split('/').pop()
+  if (!name || !/^[0-9a-f]{8,64}\.png$/.test(name)) {
+    throw new Error(`画像ファイルの場所が不正: ${location}`)
+  }
+  const path = join(IMAGE_DIR, name)
+  if (!existsSync(path)) {
+    throw new Error(`画像ファイルが見つからない: ${path}`)
+  }
+  return { path, digest }
+}
+
 function sourceImageOf(entityId: string): SourceImage {
   const entity = graph.getEntity(entityId)
   if (!entity?.location) {
     throw new Error(`親画像のファイル場所が記録されていない: ${entityId}`)
   }
-  const name = entity.location.split('/').pop()
-  if (!name || !/^[0-9a-f]{8,64}\.png$/.test(name)) {
-    throw new Error(`親画像のファイル場所が不正: ${entity.location}`)
+  return imageFileOf(entity.location, entity.digest)
+}
+
+function decodePngDataUrl(value: string): Uint8Array {
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(value)
+  if (!match || value.length > MAX_CONDITIONING_IMAGE_BYTES * 2) {
+    throw new Error('編集用の画像データが不正です')
   }
-  const path = join(IMAGE_DIR, name)
-  if (!existsSync(path)) {
-    throw new Error(`親画像のファイルが見つからない: ${path}`)
+  const bytes = Buffer.from(match[1]!, 'base64')
+  const pngMagic = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  if (
+    bytes.length === 0 ||
+    bytes.length > MAX_CONDITIONING_IMAGE_BYTES ||
+    !pngMagic.every((byte, index) => bytes[index] === byte)
+  ) {
+    throw new Error('編集用の画像はPNGで、サイズは12MB以下にしてください')
   }
-  return { path, digest: entity.digest }
+  return new Uint8Array(bytes)
+}
+
+async function storeConditioningImage(dataUrl: string): Promise<SourceImage> {
+  const bytes = decodePngDataUrl(dataUrl)
+  const digest = imageContentDigest(bytes)
+  const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
+  if (!existsSync(path)) await writeFile(path, bytes)
+  return { path, digest }
 }
 
 /**
@@ -160,6 +190,8 @@ interface GenerateBody {
   prompt?: string
   /** 分岐元の画像 Entity。省略すると新しい根になる */
   parent?: string
+  /** 利用者が指定範囲を消去した、編集用のPNG data URL */
+  maskedImage?: string
   /** 人間が参照した外部リソース（asterism の IRI など） */
   referenced?: string[]
   seed?: number
@@ -229,8 +261,10 @@ app.post('/api/session/title', async (c) => {
 app.delete('/api/session', async (c) => {
   const body = (await c.req.json()) as { root?: string }
   try {
-    const { removedImages } = graph.deleteSession(String(body.root ?? ''))
-    for (const location of removedImages) {
+    const { removedImages, removedConditioningImages } = graph.deleteSession(
+      String(body.root ?? ''),
+    )
+    for (const location of [...removedImages, ...removedConditioningImages]) {
       const name = location.split('/').pop()
       // ファイル名しか使わない。data の外は触らない
       if (name && /^[0-9a-f]{8,64}\.png$/.test(name)) {
@@ -260,7 +294,14 @@ app.post('/api/rerun', async (c) => {
 
   try {
     const result = await serial(async () => {
-      const source = original.used.length > 0 ? sourceImageOf(original.used[0]!) : undefined
+      const source = original.conditioningImageLocation
+        ? imageFileOf(
+            original.conditioningImageLocation,
+            original.conditioningImageDigest ?? '',
+          )
+        : original.used.length > 0
+          ? sourceImageOf(original.used[0]!)
+          : undefined
       const generated = await generateImage({
         prompt: original.prompt,
         seed: original.seed,
@@ -292,6 +333,12 @@ app.post('/api/rerun', async (c) => {
         ...(original.width !== undefined ? { width: original.width } : {}),
         ...(original.height !== undefined ? { height: original.height } : {}),
         ...(source ? { imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH } : {}),
+        ...(original.conditioningImageDigest && original.conditioningImageLocation
+          ? {
+              conditioningImageDigest: original.conditioningImageDigest,
+              conditioningImageLocation: original.conditioningImageLocation,
+            }
+          : {}),
         startedAtTime: generated.startedAtTime,
         endedAtTime: generated.endedAtTime,
         intent: match ? '再実行（一致）' : '再実行（食い違い）',
@@ -324,11 +371,22 @@ app.post('/api/generate', async (c) => {
 
   try {
     const source = body.parent ? sourceImageOf(body.parent) : undefined
+    if (body.maskedImage && !source) {
+      return c.json({ error: '編集範囲を指定するには親画像が必要です' }, 400)
+    }
+    const conditioningImage = body.maskedImage
+      ? await storeConditioningImage(body.maskedImage)
+      : source
     const instruction = body.intent?.trim() || body.prompt?.trim() || ''
     // 親画像を入力できるときは、親の全文プロンプトを次へ持ち越さない。
     const prompt =
       body.prompt?.trim() ||
-      promptForImageGeneration(parentActivity?.prompt, instruction, Boolean(source))
+      promptForImageGeneration(
+        parentActivity?.prompt,
+        instruction,
+        Boolean(source),
+        Boolean(body.maskedImage),
+      )
     const seed = Number.isInteger(body.seed)
       ? body.seed!
       : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
@@ -340,8 +398,11 @@ app.post('/api/generate', async (c) => {
         {
           prompt,
           seed,
-          ...(source
-            ? { imageDigest: source.digest, imageStrength: IMAGE_EDIT_STRENGTH }
+          ...(conditioningImage
+            ? {
+                imageDigest: conditioningImage.digest,
+                imageStrength: IMAGE_EDIT_STRENGTH,
+              }
             : {}),
         },
         model,
@@ -363,10 +424,10 @@ app.post('/api/generate', async (c) => {
         result = await generateImage({
           prompt,
           seed,
-          ...(source
+          ...(conditioningImage
             ? {
-                imagePath: source.path,
-                imageDigest: source.digest,
+                imagePath: conditioningImage.path,
+                imageDigest: conditioningImage.digest,
                 imageStrength: IMAGE_EDIT_STRENGTH,
               }
             : {}),
@@ -405,6 +466,12 @@ app.post('/api/generate', async (c) => {
         width: 1024,
         height: 1024,
         ...(source ? { imageStrength: IMAGE_EDIT_STRENGTH } : {}),
+        ...(body.maskedImage && conditioningImage
+          ? {
+              conditioningImageDigest: conditioningImage.digest,
+              conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
+            }
+          : {}),
         startedAtTime: result.startedAtTime,
         endedAtTime: result.endedAtTime,
         ...(body.intent?.trim() ? { intent: body.intent } : {}),

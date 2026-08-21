@@ -110,6 +110,29 @@ describe('PROV-JSONLD', () => {
     expect(restored.toData()).toEqual(original.toData())
   })
 
+  it('編集用入力画像の来歴を往復できる', () => {
+    const graph = new ProvGraph()
+    graph.recordGeneration({
+      image: bytes('edited'),
+      label: '文字を消した案',
+      intent: 'ロゴタイプを消す',
+      prompt: 'Edit the selected region',
+      model: 'z-image-turbo-4bit',
+      seed: 42,
+      imageStrength: 0.3,
+      conditioningImageDigest: 'a'.repeat(64),
+      conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:12Z',
+    })
+
+    const restored = fromProvJsonLd(toProvJsonLd(graph), DEFAULT_BASE)
+    const activity = restored.listActivities()[0]!
+    expect(activity.imageStrength).toBe(0.3)
+    expect(activity.conditioningImageDigest).toBe('a'.repeat(64))
+    expect(activity.conditioningImageLocation).toBe('images/aaaaaaaaaaaaaaaa.png')
+  })
+
   it('読み戻したグラフでも系譜を辿れる', () => {
     const original = sampleGraph()
     const restored = fromProvJsonLd(toProvJsonLd(original), DEFAULT_BASE)

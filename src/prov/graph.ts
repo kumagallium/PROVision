@@ -61,6 +61,8 @@ export interface RecordGenerationInput {
   intent?: string
   negativePrompt?: string
   imageStrength?: number
+  conditioningImageDigest?: string
+  conditioningImageLocation?: string
   provider?: string
   steps?: number
   guidance?: number
@@ -200,6 +202,12 @@ export class ProvGraph {
       ...(input.intent ? { intent: input.intent } : {}),
       ...(input.negativePrompt ? { negativePrompt: input.negativePrompt } : {}),
       ...(input.imageStrength !== undefined ? { imageStrength: input.imageStrength } : {}),
+      ...(input.conditioningImageDigest
+        ? { conditioningImageDigest: input.conditioningImageDigest }
+        : {}),
+      ...(input.conditioningImageLocation
+        ? { conditioningImageLocation: input.conditioningImageLocation }
+        : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.steps !== undefined ? { steps: input.steps } : {}),
       ...(input.guidance !== undefined ? { guidance: input.guidance } : {}),
@@ -394,14 +402,23 @@ export class ProvGraph {
    * 会話をまるごと消す。**これは記録の書き換えではなく、記録そのものの破棄。**
    * 消したことは残らない——残す意味があるなら消してはいけない、という立場を取る。
    *
-   * 返り値は、もうどこからも参照されなくなった画像の置き場所。
+   * 返り値は、もうどこからも参照されなくなった画像と編集用入力画像の置き場所。
    * ファイルの削除は呼び側（サーバ）がやる。
    */
-  deleteSession(root: Iri): { removedImages: string[] } {
+  deleteSession(root: Iri): {
+    removedImages: string[]
+    removedConditioningImages: string[]
+  } {
     const doomed = new Set(this.session(root).map((e) => e.id))
     if (doomed.size === 0) throw new Error(`その会話がグラフに無い: ${root}`)
 
     const removedImages: string[] = []
+    const conditioningImages = new Set<string>()
+    for (const activity of this.listActivities()) {
+      if (doomed.has(activity.generated) && activity.conditioningImageLocation) {
+        conditioningImages.add(activity.conditioningImageLocation)
+      }
+    }
     for (const id of doomed) {
       const location = this.entities.get(id)?.location
       if (location) removedImages.push(location)
@@ -413,7 +430,17 @@ export class ProvGraph {
     for (const [id, a] of [...this.assertions]) {
       if (doomed.has(a.about)) this.assertions.delete(id)
     }
-    return { removedImages }
+    const remainingConditioningImages = new Set(
+      this.listActivities()
+        .map((activity) => activity.conditioningImageLocation)
+        .filter((location): location is string => location !== undefined),
+    )
+    return {
+      removedImages,
+      removedConditioningImages: [...conditioningImages].filter(
+        (location) => !remainingConditioningImages.has(location),
+      ),
+    }
   }
 
   /**

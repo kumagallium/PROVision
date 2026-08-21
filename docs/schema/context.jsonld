@@ -14,6 +14,14 @@
       "@id": "provision:imageStrength",
       "@type": "xsd:decimal"
     },
+    "conditioningImageDigest": {
+      "@id": "provision:conditioningImageDigest",
+      "@type": "xsd:string"
+    },
+    "conditioningImageLocation": {
+      "@id": "provision:conditioningImageLocation",
+      "@type": "xsd:string"
+    },
     "model": {
       "@id": "provision:model",
       "@type": "xsd:string"

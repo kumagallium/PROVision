@@ -51,6 +51,9 @@ pnpm tsx scripts/generate-lineage.ts
 編集として実行する。`PROVISION_IMAGE_COMMAND` で独自コマンドを使う場合は、
 テンプレートに `{image}` と `{imageStrength}` を置く。mflux の場合は
 `--image {image} {imageStrength}` の形式を使う（`--image-strength` との併用は不可）。
+画面の「編集範囲を指定」から変更する領域を選ぶと、その領域を消去した入力画像を
+作ってから編集する。文字・ロゴに限らず、背景や図形など任意の領域を対象にでき、
+選択した入力画像も来歴に保存して再実行できるようにする。
 
 ## 画面
 

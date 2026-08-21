@@ -55,6 +55,12 @@ export function DetailPanel({
           ...(activity.width !== undefined
             ? [`size:   ${activity.width}x${activity.height ?? activity.width}`]
             : []),
+          ...(activity.imageStrength !== undefined
+            ? [`image strength: ${activity.imageStrength}`]
+            : []),
+          ...(activity.conditioningImageDigest
+            ? [`conditioning image: ${activity.conditioningImageDigest}`]
+            : []),
         ].join('\n')}
       </code>
 

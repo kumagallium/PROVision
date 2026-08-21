@@ -74,6 +74,12 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (a.negativePrompt) {
       triple(s, iri(`${PROVISION}negativePrompt`), literal(a.negativePrompt))
     }
+    if (a.conditioningImageDigest) {
+      triple(s, iri(`${PROVISION}conditioningImageDigest`), literal(a.conditioningImageDigest))
+    }
+    if (a.conditioningImageLocation) {
+      triple(s, iri(`${PROVISION}conditioningImageLocation`), literal(a.conditioningImageLocation))
+    }
     if (a.provider) triple(s, iri(`${PROVISION}provider`), literal(a.provider))
     for (const [key, value] of [
       ['steps', a.steps],

@@ -15,14 +15,19 @@ export function promptForImageGeneration(
   parentPrompt: string | undefined,
   intent: string,
   hasSourceImage: boolean,
+  hasEditRegion = false,
 ): string {
   if (!parentPrompt || !hasSourceImage) {
-    return parentPrompt ? `${parentPrompt}, ${intent}` : intent
+    const base = parentPrompt ? `${parentPrompt}, ${intent}` : intent
+    return hasSourceImage && hasEditRegion
+      ? `${base} Edit only the selected region and blend it seamlessly with the surrounding image.`
+      : base
   }
 
   if (isTextRemovalIntent(intent)) {
     return [
       'Edit the input image.',
+      ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),
       'Remove the wordmark and all lettering from the logo.',
       'Preserve the symbol, line geometry, colors, composition, and background.',
       'Do not add any text, logo, brand name, or watermark.',
@@ -32,6 +37,7 @@ export function promptForImageGeneration(
   return [
     'Edit the input image according to this instruction:',
     intent,
+    ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),
     'Preserve all existing visual elements, composition, colors, and geometry unless explicitly changed.',
     'Do not add any text, logo, brand name, or watermark unless explicitly requested.',
   ].join(' ')

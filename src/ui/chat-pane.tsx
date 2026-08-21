@@ -8,7 +8,7 @@
  * 途中の版を選んでから送れば、そこから枝が生える。分岐は特別な操作ではなく、
  * 「どこに居るか」を変えて送るだけで起きる。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
 import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { imageUrlOf } from './graph-adapter.js'
@@ -17,6 +17,7 @@ import { DetailPanel } from './detail-panel.js'
 import { AssertPanel } from './assert-panel.js'
 import { ProvImage } from './prov-image.js'
 import { apiFetch } from './api-base.js'
+import { EditRegionDialog } from './edit-region-dialog.js'
 
 interface Props {
   graph: ProvGraph | null
@@ -29,11 +30,20 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editRegionOpen, setEditRegionOpen] = useState(false)
+  const [maskedImage, setMaskedImage] = useState<string | null>(null)
 
   const chain = graph && current ? graph.lineage(current) : []
   const children = graph && current ? graph.children(current) : []
   /** いま居る版に子がある = ここへ送ると枝が生える */
   const willBranch = children.length > 0
+  const currentEntity = graph && current ? graph.getEntity(current) : undefined
+  const currentImageUrl = currentEntity ? imageUrlOf(currentEntity) : undefined
+
+  useEffect(() => {
+    setMaskedImage(null)
+    setEditRegionOpen(false)
+  }, [current])
 
   async function send() {
     const intent = text.trim()
@@ -44,7 +54,11 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
       const res = await apiFetch('api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent, ...(current ? { parent: current } : {}) }),
+        body: JSON.stringify({
+          intent,
+          ...(current ? { parent: current } : {}),
+          ...(maskedImage ? { maskedImage } : {}),
+        }),
       })
       const body = (await res.json()) as
         | { entity: { id: string }; graph: ProvJsonLdDocument }
@@ -54,6 +68,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
       }
       onGraph(body.graph)
       onSelect(body.entity.id)
+      setMaskedImage(null)
       setText('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
@@ -63,7 +78,8 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   }
 
   return (
-    <section
+    <>
+      <section
       style={{
         borderLeft: '1px solid #e0e5e8',
         display: 'grid',
@@ -153,6 +169,29 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             この版にはすでに続きがあります。ここへ送ると<strong>枝が増えます</strong>
           </div>
         ) : null}
+        {currentImageUrl ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <button
+              type="button"
+              onClick={() => setEditRegionOpen(true)}
+              style={{ padding: '5px 8px', fontSize: 11 }}
+            >
+              {maskedImage ? '編集範囲を変更' : '編集範囲を指定'}
+            </button>
+            {maskedImage ? (
+              <button
+                type="button"
+                onClick={() => setMaskedImage(null)}
+                style={{ padding: '5px 8px', fontSize: 11 }}
+              >
+                指定を解除
+              </button>
+            ) : null}
+            <span style={{ fontSize: 11, color: '#7b8892' }}>
+              {maskedImage ? '範囲指定済み' : '任意の領域を選べます'}
+            </span>
+          </div>
+        ) : null}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -191,6 +230,17 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
           {busy ? '生成中…' : willBranch ? 'ここから分岐して生成' : '生成'}
         </button>
       </div>
-    </section>
+      </section>
+      {editRegionOpen && currentImageUrl ? (
+        <EditRegionDialog
+          imageUrl={currentImageUrl}
+          onCancel={() => setEditRegionOpen(false)}
+          onConfirm={(image) => {
+            setMaskedImage(image)
+            setEditRegionOpen(false)
+          }}
+        />
+      ) : null}
+    </>
   )
 }

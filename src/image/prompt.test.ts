@@ -23,4 +23,9 @@ describe('画像編集用プロンプト', () => {
       'base prompt, make it blue',
     )
   })
+
+  it('指定範囲だけを編集する指示を含める', () => {
+    const prompt = promptForImageGeneration(undefined, '背景を消す', true, true)
+    expect(prompt).toContain('Edit only the selected region')
+  })
 })
