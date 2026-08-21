@@ -32,7 +32,6 @@ export function EditRegionDialog({ imageUrl, onCancel, onConfirm }: Props) {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null)
   const [size, setSize] = useState<{ width: number; height: number } | null>(null)
   const [region, setRegion] = useState<Region | null>(null)
-  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     const image = new Image()
@@ -81,7 +80,6 @@ export function EditRegionDialog({ imageUrl, onCancel, onConfirm }: Props) {
     const point = pointOf(event)
     dragStartRef.current = point
     setRegion({ x: point.x, y: point.y, width: 0, height: 0 })
-    setDragging(true)
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
@@ -96,7 +94,6 @@ export function EditRegionDialog({ imageUrl, onCancel, onConfirm }: Props) {
     if (!start) return
     setRegion(regionOf(start, pointOf(event)))
     dragStartRef.current = null
-    setDragging(false)
     event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
@@ -175,12 +172,14 @@ export function EditRegionDialog({ imageUrl, onCancel, onConfirm }: Props) {
           onPointerUp={finishSelection}
           style={{
             display: 'block',
-            width: '100%',
+            width: 'auto',
+            height: 'auto',
+            maxWidth: '100%',
             maxHeight: '68vh',
-            objectFit: 'contain',
+            margin: '0 auto',
             border: '1px solid #d8dfe3',
             borderRadius: 8,
-            cursor: dragging ? 'crosshair' : 'crosshair',
+            cursor: 'crosshair',
             touchAction: 'none',
           }}
         />
