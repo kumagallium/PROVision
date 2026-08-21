@@ -65,6 +65,11 @@ export interface RecordGenerationInput {
   conditioningImageLocation?: string
   maskImageDigest?: string
   maskImageLocation?: string
+  planningMode?: 'rules' | 'llm'
+  plannerProvider?: string
+  plannerModel?: string
+  selectedTool?: string
+  toolArguments?: string
   provider?: string
   steps?: number
   guidance?: number
@@ -212,6 +217,11 @@ export class ProvGraph {
         : {}),
       ...(input.maskImageDigest ? { maskImageDigest: input.maskImageDigest } : {}),
       ...(input.maskImageLocation ? { maskImageLocation: input.maskImageLocation } : {}),
+      ...(input.planningMode ? { planningMode: input.planningMode } : {}),
+      ...(input.plannerProvider ? { plannerProvider: input.plannerProvider } : {}),
+      ...(input.plannerModel ? { plannerModel: input.plannerModel } : {}),
+      ...(input.selectedTool ? { selectedTool: input.selectedTool } : {}),
+      ...(input.toolArguments ? { toolArguments: input.toolArguments } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.steps !== undefined ? { steps: input.steps } : {}),
       ...(input.guidance !== undefined ? { guidance: input.guidance } : {}),

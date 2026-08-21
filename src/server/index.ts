@@ -15,10 +15,37 @@ import { loadGraph, saveGraph } from '../prov/store.js'
 import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
-import { cacheKeyOf, generateImage, modelIdOf, resolveImageCommand } from '../image/mflux.js'
-import { imageContentDigest } from '../image/png.js'
-import { isRemovalIntent, promptForImageGeneration } from '../image/prompt.js'
+import {
+  cacheKeyOf,
+  generateImage,
+  modelIdOf,
+  resolveImageCommand,
+  type GenerateResult,
+} from '../image/mflux.js'
+import { imageContentDigest, pngDimensions } from '../image/png.js'
+import { promptForImageGeneration } from '../image/prompt.js'
 import { inpaintCacheKeyOf, inpaintImage } from '../image/lama.js'
+import {
+  backgroundRemovalCacheKeyOf,
+  removeBackground,
+  resolveBackgroundRemovalCommand,
+} from '../image/background.js'
+import {
+  processStandardImage,
+  standardImageCacheKeyOf,
+  type StandardImageInput,
+} from '../image/standard.js'
+import {
+  planImageOperation,
+  type ImageToolName,
+  type PlannedImageOperation,
+  validateImagePlan,
+} from '../ai/planner.js'
+import {
+  plannerCredentials,
+  publicAiPlannerConfig,
+  saveAiPlannerConfig,
+} from '../ai/config.js'
 
 const DATA_DIR = resolve(process.env.PROVISION_DATA_DIR ?? 'data/run')
 const IMAGE_DIR = join(DATA_DIR, 'images')
@@ -37,6 +64,9 @@ let graph: ProvGraph = existsSync(GRAPH_PATH)
 
 const imageTool = graph.addAgent('mflux', 'mflux (z-image-turbo-4bit)')
 const inpaintTool = graph.addAgent('lama', 'LaMa via IOPaint')
+const standardTool = graph.addAgent('jimp', 'Jimp standard image processing')
+const backgroundTool = graph.addAgent('rembg', 'rembg (U²-Net)')
+const rulesPlanner = graph.addAgent('image-router-rules', 'PROVision image routing rules')
 
 /**
  * 来歴の author。**自己申告で、検証はしない。**
@@ -100,6 +130,29 @@ function sourceImageOf(entityId: string): SourceImage {
     throw new Error(`親画像のファイル場所が記録されていない: ${entityId}`)
   }
   return imageFileOf(entity.location, entity.digest)
+}
+
+function isStandardTool(tool: ImageToolName): tool is StandardImageInput['tool'] {
+  return ['image.trim', 'image.crop-square', 'image.rotate', 'image.resize'].includes(tool)
+}
+
+function executorAgent(tool: ImageToolName) {
+  if (tool === 'image.erase') return inpaintTool
+  if (tool === 'background.remove') return backgroundTool
+  if (isStandardTool(tool)) return standardTool
+  return imageTool
+}
+
+function plannerAgent(planning: PlannedImageOperation) {
+  if (planning.mode === 'rules') return rulesPlanner
+  return graph.addAgent(
+    `image-router-${sha256(
+      `${planning.plannerProvider ?? 'unknown'}:${planning.plannerModel ?? 'unknown'}`,
+    ).slice(0, 12)}`,
+    `Image router: ${planning.plannerProvider ?? 'unknown'} / ${
+      planning.plannerModel ?? 'unknown'
+    }`,
+  )
 }
 
 function decodePngDataUrl(value: string): Uint8Array {
@@ -173,6 +226,36 @@ app.put('/api/identity', async (c) => {
   }
   await writeFile(IDENTITY_PATH, `${JSON.stringify(identity, null, 2)}\n`, 'utf8')
   return c.json(identity)
+})
+
+app.get('/api/ai/planner', async (c) => {
+  try {
+    return c.json(await publicAiPlannerConfig(DATA_DIR))
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+  }
+})
+
+app.put('/api/ai/planner', async (c) => {
+  try {
+    return c.json(await saveAiPlannerConfig(DATA_DIR, await c.req.json()))
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+app.post('/api/ai/planner/test', async (c) => {
+  try {
+    const planned = await planImageOperation({
+      intent: 'Make the existing image slightly warmer without changing its composition.',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      planner: await plannerCredentials(DATA_DIR),
+    })
+    if (planned.warning) return c.json({ error: planned.warning }, 400)
+    return c.json(planned)
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
 })
 
 /** 画像を配る。ファイル名しか受け取らないので、data の外は読めない */
@@ -316,31 +399,56 @@ app.post('/api/rerun', async (c) => {
       if (mask && !parentSource) {
         throw new Error('inpaintingの再実行に必要な親画像が記録されていません')
       }
-      const generated =
-        mask && parentSource
-          ? await inpaintImage({
-              imagePath: parentSource.path,
-              imageDigest: parentSource.digest,
-              maskPath: mask.path,
-              maskDigest: mask.digest,
-            })
-          : await generateImage({
-              prompt: original.prompt,
-              seed: original.seed,
-              ...(original.width !== undefined ? { width: original.width } : {}),
-              ...(original.height !== undefined ? { height: original.height } : {}),
-              ...(original.steps !== undefined ? { steps: original.steps } : {}),
-              ...(generationSource
-                ? {
-                    imagePath: generationSource.path,
-                    imageDigest: generationSource.digest,
-                    imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH,
-                  }
-                : {}),
-            })
+      const tool = (original.selectedTool ??
+        (mask ? 'image.erase' : parentSource ? 'image.edit' : 'image.generate')) as ImageToolName
+      const plan = validateImagePlan(
+        {
+          tool,
+          arguments: original.toolArguments ? JSON.parse(original.toolArguments) : {},
+        },
+        { hasSourceImage: Boolean(parentSource), hasEditRegion: Boolean(mask) },
+      )
+      let generated: GenerateResult
+      if (tool === 'image.erase' && mask && parentSource) {
+        generated = await inpaintImage({
+          imagePath: parentSource.path,
+          imageDigest: parentSource.digest,
+          maskPath: mask.path,
+          maskDigest: mask.digest,
+        })
+      } else if (parentSource && isStandardTool(tool)) {
+        generated = await processStandardImage({
+          tool,
+          arguments: plan.arguments,
+          imagePath: parentSource.path,
+          imageDigest: parentSource.digest,
+        })
+      } else if (tool === 'background.remove' && parentSource) {
+        generated = await removeBackground({
+          imagePath: parentSource.path,
+          imageDigest: parentSource.digest,
+          command: resolveBackgroundRemovalCommand(),
+        })
+      } else {
+        generated = await generateImage({
+          prompt: original.prompt,
+          seed: original.seed,
+          ...(original.width !== undefined ? { width: original.width } : {}),
+          ...(original.height !== undefined ? { height: original.height } : {}),
+          ...(original.steps !== undefined ? { steps: original.steps } : {}),
+          ...(tool === 'image.edit' && generationSource
+            ? {
+                imagePath: generationSource.path,
+                imageDigest: generationSource.digest,
+                imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH,
+              }
+            : {}),
+        })
+      }
       const digest = imageContentDigest(generated.png)
       const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
       await writeFile(path, generated.png)
+      const dimensions = pngDimensions(generated.png)
 
       const match = digest === graph.getEntity(target)?.digest
       const entity = graph.recordGeneration({
@@ -352,9 +460,11 @@ app.post('/api/rerun', async (c) => {
         provider: generated.provider,
         seed: original.seed,
         ...(original.steps !== undefined ? { steps: original.steps } : {}),
-        ...(original.width !== undefined ? { width: original.width } : {}),
-        ...(original.height !== undefined ? { height: original.height } : {}),
-        ...(!mask && generationSource
+        ...(dimensions ??
+          (original.width !== undefined && original.height !== undefined
+            ? { width: original.width, height: original.height }
+            : {})),
+        ...(tool === 'image.edit' && generationSource
           ? { imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH }
           : {}),
         ...(original.conditioningImageDigest && original.conditioningImageLocation
@@ -369,6 +479,11 @@ app.post('/api/rerun', async (c) => {
               maskImageLocation: original.maskImageLocation,
             }
           : {}),
+        ...(original.planningMode ? { planningMode: original.planningMode } : {}),
+        ...(original.plannerProvider ? { plannerProvider: original.plannerProvider } : {}),
+        ...(original.plannerModel ? { plannerModel: original.plannerModel } : {}),
+        selectedTool: tool,
+        toolArguments: JSON.stringify(plan.arguments),
         startedAtTime: generated.startedAtTime,
         endedAtTime: generated.endedAtTime,
         intent: match ? '再実行（一致）' : '再実行（食い違い）',
@@ -376,7 +491,7 @@ app.post('/api/rerun', async (c) => {
         // 前の絵を材料にしたわけではないので派生ではない。同じものを指す別の実体
         ...(match ? {} : { alternateOf: target }),
         ...(original.referenced.length > 0 ? { referenced: original.referenced } : {}),
-        agents: [(mask ? inpaintTool : imageTool).id, (await personAgent()).id],
+        agents: [executorAgent(tool).id, (await personAgent()).id],
       })
       await persist()
       return { match, entity }
@@ -405,14 +520,24 @@ app.post('/api/generate', async (c) => {
       return c.json({ error: '編集範囲を指定するには親画像が必要です' }, 400)
     }
     const instruction = body.intent?.trim() || body.prompt?.trim() || ''
-    const useInpainting = Boolean(body.maskImage && isRemovalIntent(instruction))
+    const planning = await planImageOperation({
+      intent: instruction,
+      context: {
+        hasSourceImage: Boolean(source),
+        hasEditRegion: Boolean(body.maskImage),
+      },
+      planner: await plannerCredentials(DATA_DIR),
+    })
+    const plan = planning.plan
+    const useInpainting = plan.tool === 'image.erase'
     const maskImage =
       useInpainting && body.maskImage ? await storePngDataUrl(body.maskImage) : undefined
-    const conditioningImage = useInpainting
-      ? undefined
-      : body.maskedImage
-        ? await storePngDataUrl(body.maskedImage)
-        : source
+    const conditioningImage =
+      plan.tool === 'image.edit'
+        ? body.maskedImage
+          ? await storePngDataUrl(body.maskedImage)
+          : source
+        : undefined
     const inpaintInput =
       useInpainting && source && maskImage
         ? {
@@ -422,56 +547,80 @@ app.post('/api/generate', async (c) => {
             maskDigest: maskImage.digest,
           }
         : undefined
+    if (useInpainting && !inpaintInput) {
+      return c.json({ error: '範囲を消去するには編集範囲のマスクが必要です' }, 400)
+    }
+    const standardInput =
+      source && isStandardTool(plan.tool)
+        ? {
+            tool: plan.tool,
+            arguments: plan.arguments,
+            imagePath: source.path,
+            imageDigest: source.digest,
+          }
+        : undefined
+    const backgroundInput =
+      source && plan.tool === 'background.remove'
+        ? {
+            imagePath: source.path,
+            imageDigest: source.digest,
+            command: resolveBackgroundRemovalCommand(),
+          }
+        : undefined
     // 親画像を入力できるときは、親の全文プロンプトを次へ持ち越さない。
     const prompt = useInpainting
       ? 'Inpaint the masked region using the surrounding image.'
-      : body.prompt?.trim() ||
-        promptForImageGeneration(
-          parentActivity?.prompt,
-          instruction,
-          Boolean(source),
-          Boolean(body.maskedImage),
-        )
-    const seed = useInpainting
-      ? 0
-      : Number.isInteger(body.seed)
+      : plan.tool === 'image.generate' || plan.tool === 'image.edit'
+        ? body.prompt?.trim() ||
+          promptForImageGeneration(
+            parentActivity?.prompt,
+            instruction,
+            Boolean(source),
+            Boolean(body.maskedImage),
+          )
+        : instruction
+    const usesImageModel = plan.tool === 'image.generate' || plan.tool === 'image.edit'
+    const seed = usesImageModel
+      ? Number.isInteger(body.seed)
         ? body.seed!
         : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
           Number.parseInt(sha256(`${prompt}${Date.now()}`).slice(0, 8), 16) % 2 ** 31
+      : 0
 
     const entity = await serial(async () => {
-      const model = useInpainting ? 'big-lama' : modelIdOf(resolveImageCommand())
       const key = inpaintInput
-        ? inpaintCacheKeyOf(inpaintInput, model)
-        : cacheKeyOf(
-            {
-              prompt,
-              seed,
-              ...(conditioningImage
-                ? {
-                    imageDigest: conditioningImage.digest,
-                    imageStrength: IMAGE_EDIT_STRENGTH,
-                  }
-                : {}),
-            },
-            model,
-          )
+        ? inpaintCacheKeyOf(inpaintInput)
+        : standardInput
+          ? standardImageCacheKeyOf(standardInput)
+          : backgroundInput
+            ? backgroundRemovalCacheKeyOf(backgroundInput)
+            : cacheKeyOf(
+                {
+                  prompt,
+                  seed,
+                  ...(conditioningImage
+                    ? {
+                        imageDigest: conditioningImage.digest,
+                        imageStrength: IMAGE_EDIT_STRENGTH,
+                      }
+                    : {}),
+                },
+                modelIdOf(resolveImageCommand()),
+              )
       const cachedPng = join(CACHE_DIR, `${key}.png`)
       const cachedMeta = join(CACHE_DIR, `${key}.json`)
 
-      let result: {
-        png: Uint8Array
-        model: string
-        provider: string
-        startedAtTime: string
-        endedAtTime: string
-      }
+      let result: GenerateResult
       if (existsSync(cachedPng) && existsSync(cachedMeta)) {
         const meta = JSON.parse(await readFile(cachedMeta, 'utf8'))
         result = { ...meta, png: new Uint8Array(await readFile(cachedPng)) }
       } else {
         result = inpaintInput
           ? await inpaintImage(inpaintInput)
+          : standardInput
+            ? await processStandardImage(standardInput)
+            : backgroundInput
+              ? await removeBackground(backgroundInput)
           : await generateImage({
               prompt,
               seed,
@@ -504,6 +653,7 @@ app.post('/api/generate', async (c) => {
       const digest = imageContentDigest(result.png)
       const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
       await writeFile(path, result.png)
+      const dimensions = pngDimensions(result.png)
 
       const recorded = graph.recordGeneration({
         image: { digest },
@@ -513,11 +663,12 @@ app.post('/api/generate', async (c) => {
         model: result.model,
         provider: result.provider,
         seed,
-        ...(!useInpainting ? { steps: 8 } : {}),
-        width: 1024,
-        height: 1024,
-        ...(!useInpainting && source ? { imageStrength: IMAGE_EDIT_STRENGTH } : {}),
-        ...(!useInpainting && body.maskedImage && conditioningImage
+        ...(usesImageModel ? { steps: 8 } : {}),
+        ...(dimensions ? dimensions : {}),
+        ...(plan.tool === 'image.edit' && source
+          ? { imageStrength: IMAGE_EDIT_STRENGTH }
+          : {}),
+        ...(plan.tool === 'image.edit' && body.maskedImage && conditioningImage
           ? {
               conditioningImageDigest: conditioningImage.digest,
               conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
@@ -529,18 +680,38 @@ app.post('/api/generate', async (c) => {
               maskImageLocation: `images/${maskImage.digest.slice(0, 16)}.png`,
             }
           : {}),
+        planningMode: planning.mode,
+        ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
+        ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
+        selectedTool: plan.tool,
+        toolArguments: JSON.stringify(plan.arguments),
         startedAtTime: result.startedAtTime,
         endedAtTime: result.endedAtTime,
         ...(body.intent?.trim() ? { intent: body.intent } : {}),
         ...(body.parent ? { derivedFrom: [body.parent] } : {}),
         ...(body.referenced?.length ? { referenced: body.referenced } : {}),
-        agents: [(useInpainting ? inpaintTool : imageTool).id, (await personAgent()).id],
+        agents: [
+          executorAgent(plan.tool).id,
+          plannerAgent(planning).id,
+          (await personAgent()).id,
+        ],
       })
       await persist()
       return recorded
     })
 
-    return c.json({ entity, graph: toProvJsonLd(graph) })
+    return c.json({
+      entity,
+      graph: toProvJsonLd(graph),
+      routing: {
+        mode: planning.mode,
+        tool: plan.tool,
+        arguments: plan.arguments,
+        ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
+        ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
+        ...(planning.warning ? { warning: planning.warning } : {}),
+      },
+    })
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
     return c.json({ error: why }, 500)

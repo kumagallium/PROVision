@@ -45,6 +45,9 @@ pnpm tsx scripts/generate-lineage.ts
 
 # 選択範囲から物体・文字を消すLaMaを導入する（初回実行時に約196MBを取得）
 uv tool install --python 3.10 iopaint
+
+# 「背景を透明にして」を使う場合だけrembgを導入する
+uv tool install --python 3.11 "rembg[cpu,cli]"
 ```
 
 生成は直列で 1 枚 2〜3 分。途中で落ちても `data/run/cache/` から続きを走る
@@ -63,6 +66,28 @@ image-to-imageへ渡す。文字・ロゴに限らず、人物・物体・傷な
 
 独自のinpaintingコマンドは`PROVISION_INPAINT_COMMAND`で指定できる。テンプレートには
 `{image}`、`{mask}`と、出力先を示す`{out}`または`{outputDir}`が必要。
+
+### 画像ツールの振り分け
+
+画像への指示は、許可済みの内部ツールから1つを選んで実行する。明示的な指示はまず
+規則ベースで処理するため、LLMを設定しなくても全経路を利用できる。
+
+- 新規生成・一般的な生成編集: mflux / z-image
+- 指定範囲の消去・修復: LaMa / IOPaint
+- 余白整理・正方形切り抜き・回転・リサイズ: Jimp
+- 背景透明化: rembg（上記の任意インストールが必要）
+
+設定画面の「画像ツールのAI振り分け」を有効にすると、規則で確定できない指示だけを
+Anthropic、OpenAI、Google Gemini、OpenAI互換APIへ送り、構造化されたツール計画を
+作らせる。OllamaはOpenAI互換として `http://127.0.0.1:11434/v1` を指定できる。
+LLMの出力は許可済みツール名・引数・入力条件を検証し、失敗時は画面へ理由を示して
+規則ベースへ戻す。macOSデスクトップ版のAPIキーはKeychainへ保存し、来歴や設定JSONへは
+書かない。それ以外の環境では平文保存せずメモリだけに保持するため、アプリ終了後は
+再入力が必要。
+
+選択したツール、引数、規則／LLMの別、プランナーモデルはPROV来歴へ保存され、再実行でも
+同じツールを使う。Jimpとrembg本体はMIT License。rembgのモデルはアプリへ同梱せず、
+利用者が導入したローカル環境を呼び出す。
 
 ## 画面
 

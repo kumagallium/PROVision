@@ -23,6 +23,15 @@ interface Identity {
   email: string
 }
 
+interface AiPlannerConfig {
+  enabled: boolean
+  provider: 'anthropic' | 'openai' | 'google' | 'openai-compatible'
+  modelId: string
+  apiBase: string
+  hasApiKey: boolean
+  keyStorage: 'keychain' | 'memory'
+}
+
 const LABEL: React.CSSProperties = {
   display: 'block',
   fontSize: 12,
@@ -57,6 +66,11 @@ export function SettingsDialog({
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [identity, setIdentity] = useState<Identity>({ name: '', email: '' })
   const [saved, setSaved] = useState(false)
+  const [aiPlanner, setAiPlanner] = useState<AiPlannerConfig | null>(null)
+  const [aiApiKey, setAiApiKey] = useState('')
+  const [aiState, setAiState] = useState<'idle' | 'saving' | 'saved' | 'testing' | 'ok'>(
+    'idle',
+  )
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState('')
   const [updateState, setUpdateState] = useState<
@@ -71,6 +85,14 @@ export function SettingsDialog({
       .then((r) => r.json())
       .then((v: Identity) => setIdentity(v))
       .catch(() => undefined)
+
+    void apiFetch('api/ai/planner')
+      .then(async (response) => {
+        const value = (await response.json()) as AiPlannerConfig & { error?: string }
+        if (!response.ok) throw new Error(value.error ?? 'AIプランナー設定を読めません')
+        setAiPlanner(value)
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
 
     if (!isTauri()) return
     void import('@tauri-apps/api/core')
@@ -134,6 +156,47 @@ export function SettingsDialog({
     if (res.ok) {
       setSaved(true)
       setTimeout(() => setSaved(false), 1800)
+    }
+  }
+
+  async function saveAiPlanner() {
+    if (!aiPlanner) return
+    setAiState('saving')
+    setError(null)
+    try {
+      const response = await apiFetch('api/ai/planner', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: aiPlanner.enabled,
+          provider: aiPlanner.provider,
+          modelId: aiPlanner.modelId,
+          apiBase: aiPlanner.apiBase,
+          ...(aiApiKey.trim() ? { apiKey: aiApiKey } : {}),
+        }),
+      })
+      const value = (await response.json()) as AiPlannerConfig & { error?: string }
+      if (!response.ok) throw new Error(value.error ?? 'AIプランナー設定を保存できません')
+      setAiPlanner(value)
+      setAiApiKey('')
+      setAiState('saved')
+    } catch (e: unknown) {
+      setAiState('idle')
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function testAiPlanner() {
+    setAiState('testing')
+    setError(null)
+    try {
+      const response = await apiFetch('api/ai/planner/test', { method: 'POST' })
+      const value = (await response.json()) as { error?: string }
+      if (!response.ok) throw new Error(value.error ?? 'AIプランナーへ接続できません')
+      setAiState('ok')
+    } catch (e: unknown) {
+      setAiState('idle')
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -245,6 +308,97 @@ export function SettingsDialog({
         >
           {saved ? '保存しました' : 'identity を保存'}
         </button>
+
+        <label style={LABEL}>画像ツールのAI振り分け（任意）</label>
+        <p style={{ fontSize: 12, color: '#5c6b73', margin: '0 0 8px' }}>
+          有効にすると、曖昧な指示で使うツールを外部またはローカルLLMが選びます。
+          未設定・接続失敗時も、規則ベースで画像編集を続けられます。
+        </p>
+        {aiPlanner ? (
+          <div
+            style={{
+              border: '1px solid #e0e5e8',
+              borderRadius: 8,
+              padding: '10px 12px 12px',
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={aiPlanner.enabled}
+                onChange={(e) => setAiPlanner({ ...aiPlanner, enabled: e.target.checked })}
+              />
+              AIによるツール選択を有効にする
+            </label>
+            <select
+              value={aiPlanner.provider}
+              onChange={(e) =>
+                setAiPlanner({
+                  ...aiPlanner,
+                  provider: e.target.value as AiPlannerConfig['provider'],
+                  apiBase:
+                    e.target.value === 'openai-compatible'
+                      ? 'http://127.0.0.1:11434/v1'
+                      : '',
+                })
+              }
+              style={{ ...INPUT, marginTop: 10 }}
+            >
+              <option value="openai-compatible">OpenAI互換 / Ollama</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="google">Google Gemini</option>
+            </select>
+            <input
+              value={aiPlanner.modelId}
+              onChange={(e) => setAiPlanner({ ...aiPlanner, modelId: e.target.value })}
+              placeholder="モデルID（例: qwen2.5:3b）"
+              style={{ ...INPUT, marginTop: 8 }}
+            />
+            <input
+              value={aiPlanner.apiBase}
+              onChange={(e) => setAiPlanner({ ...aiPlanner, apiBase: e.target.value })}
+              placeholder="API Base（公式プロバイダーは空欄で可）"
+              style={{ ...INPUT, marginTop: 8 }}
+            />
+            <input
+              type="password"
+              value={aiApiKey}
+              onChange={(e) => setAiApiKey(e.target.value)}
+              placeholder={aiPlanner.hasApiKey ? 'APIキーは保存済み（変更時だけ入力）' : 'APIキー'}
+              autoComplete="new-password"
+              style={{ ...INPUT, marginTop: 8 }}
+            />
+            <p style={{ fontSize: 11.5, color: '#5c6b73', margin: '6px 0 0' }}>
+              {aiPlanner.keyStorage === 'keychain'
+                ? 'APIキーはmacOS Keychainへ保存し、設定ファイルには書きません。'
+                : 'この環境ではAPIキーをメモリだけに保持し、アプリ終了時に消去します。'}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <button
+                type="button"
+                onClick={() => void saveAiPlanner()}
+                disabled={aiState === 'saving'}
+                style={INPUT_BUTTON}
+              >
+                {aiState === 'saving' ? '保存中…' : aiState === 'saved' ? '保存しました' : '保存'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void testAiPlanner()}
+                disabled={!aiPlanner.enabled || aiState === 'testing'}
+                style={INPUT_BUTTON}
+              >
+                {aiState === 'testing' ? '接続中…' : '接続テスト'}
+              </button>
+              {aiState === 'ok' ? (
+                <span style={{ fontSize: 12, color: '#387450' }}>接続できました。</span>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p style={{ fontSize: 12, color: '#7b8892' }}>設定を読み込んでいます…</p>
+        )}
 
         <label style={LABEL}>アプリ情報</label>
         <div

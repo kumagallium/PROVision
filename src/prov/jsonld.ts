@@ -119,6 +119,11 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     ...(a.maskImageLocation
       ? { 'provision:maskImageLocation': lit(a.maskImageLocation) }
       : {}),
+    ...(a.planningMode ? { 'provision:planningMode': lit(a.planningMode) } : {}),
+    ...(a.plannerProvider ? { 'provision:plannerProvider': lit(a.plannerProvider) } : {}),
+    ...(a.plannerModel ? { 'provision:plannerModel': lit(a.plannerModel) } : {}),
+    ...(a.selectedTool ? { 'provision:selectedTool': lit(a.selectedTool) } : {}),
+    ...(a.toolArguments ? { 'provision:toolArguments': lit(a.toolArguments) } : {}),
     ...(a.provider ? { 'provision:provider': lit(a.provider) } : {}),
     ...optionalNumber('provision:steps', a.steps, `${XSD}integer`),
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
@@ -367,6 +372,22 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(str(n, 'provision:maskImageLocation') !== undefined
         ? { maskImageLocation: str(n, 'provision:maskImageLocation')! }
+        : {}),
+      ...(str(n, 'provision:planningMode') === 'rules' ||
+      str(n, 'provision:planningMode') === 'llm'
+        ? { planningMode: str(n, 'provision:planningMode') as 'rules' | 'llm' }
+        : {}),
+      ...(str(n, 'provision:plannerProvider') !== undefined
+        ? { plannerProvider: str(n, 'provision:plannerProvider')! }
+        : {}),
+      ...(str(n, 'provision:plannerModel') !== undefined
+        ? { plannerModel: str(n, 'provision:plannerModel')! }
+        : {}),
+      ...(str(n, 'provision:selectedTool') !== undefined
+        ? { selectedTool: str(n, 'provision:selectedTool')! }
+        : {}),
+      ...(str(n, 'provision:toolArguments') !== undefined
+        ? { toolArguments: str(n, 'provision:toolArguments')! }
         : {}),
       ...(str(n, 'provision:provider') !== undefined
         ? { provider: str(n, 'provision:provider')! }

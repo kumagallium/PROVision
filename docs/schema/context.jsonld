@@ -30,6 +30,26 @@
       "@id": "provision:maskImageLocation",
       "@type": "xsd:string"
     },
+    "planningMode": {
+      "@id": "provision:planningMode",
+      "@type": "xsd:string"
+    },
+    "plannerProvider": {
+      "@id": "provision:plannerProvider",
+      "@type": "xsd:string"
+    },
+    "plannerModel": {
+      "@id": "provision:plannerModel",
+      "@type": "xsd:string"
+    },
+    "selectedTool": {
+      "@id": "provision:selectedTool",
+      "@type": "xsd:string"
+    },
+    "toolArguments": {
+      "@id": "provision:toolArguments",
+      "@type": "xsd:string"
+    },
     "model": {
       "@id": "provision:model",
       "@type": "xsd:string"

@@ -62,6 +62,17 @@ export function DetailPanel({
             ? [`conditioning image: ${activity.conditioningImageDigest}`]
             : []),
           ...(activity.maskImageDigest ? [`inpainting mask: ${activity.maskImageDigest}`] : []),
+          ...(activity.selectedTool ? [`tool:   ${activity.selectedTool}`] : []),
+          ...(activity.toolArguments ? [`tool arguments: ${activity.toolArguments}`] : []),
+          ...(activity.planningMode
+            ? [
+                `planning: ${activity.planningMode}${
+                  activity.plannerModel
+                    ? ` (${activity.plannerProvider ?? 'unknown'} / ${activity.plannerModel})`
+                    : ''
+                }`,
+              ]
+            : []),
         ].join('\n')}
       </code>
 

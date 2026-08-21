@@ -184,6 +184,11 @@ fn start_sidecar(
         // 本体が消えたら自決させるための目印
         .env("PROVISION_PARENT_PID", std::process::id().to_string())
         .env("PROVISION_APP_VERSION", app.package_info().version.to_string())
+        // APIキーは設定ファイルへ書かず、macOSではKeychainへ保存する。
+        .env(
+            "PROVISION_USE_KEYCHAIN",
+            if cfg!(target_os = "macos") { "1" } else { "0" },
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

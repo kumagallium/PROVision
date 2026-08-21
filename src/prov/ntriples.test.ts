@@ -133,6 +133,10 @@ describe('N-Triples', () => {
       conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
       maskImageDigest: 'b'.repeat(64),
       maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      planningMode: 'rules',
+      plannerProvider: 'openai-compatible',
+      selectedTool: 'image.erase',
+      toolArguments: '{}',
       startedAtTime: '2026-08-20T10:00:00Z',
       endedAtTime: '2026-08-20T10:00:12Z',
     })
@@ -145,5 +149,9 @@ describe('N-Triples', () => {
     expect(lines.some((line) => line.includes('#conditioningImageLocation'))).toBe(true)
     expect(lines.some((line) => line.includes('#maskImageDigest'))).toBe(true)
     expect(lines.some((line) => line.includes('#maskImageLocation'))).toBe(true)
+    expect(lines.some((line) => line.includes('#planningMode'))).toBe(true)
+    expect(lines.some((line) => line.includes('#plannerProvider'))).toBe(true)
+    expect(lines.some((line) => line.includes('#selectedTool'))).toBe(true)
+    expect(lines.some((line) => line.includes('#toolArguments'))).toBe(true)
   })
 })

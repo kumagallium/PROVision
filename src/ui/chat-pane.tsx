@@ -31,6 +31,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [routingNotice, setRoutingNotice] = useState<string | null>(null)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
   const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
@@ -51,6 +52,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
     if (!intent || busy) return
     setBusy(true)
     setError(null)
+    setRoutingNotice(null)
     try {
       const res = await apiFetch('api/generate', {
         method: 'POST',
@@ -67,13 +69,24 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         }),
       })
       const body = (await res.json()) as
-        | { entity: { id: string }; graph: ProvJsonLdDocument }
+        | {
+            entity: { id: string }
+            graph: ProvJsonLdDocument
+            routing?: { mode: 'rules' | 'llm'; tool: string; warning?: string }
+          }
         | { error: string }
       if (!res.ok || 'error' in body) {
         throw new Error('error' in body ? body.error : `生成に失敗（${res.status}）`)
       }
       onGraph(body.graph)
       onSelect(body.entity.id)
+      if (body.routing) {
+        const source = body.routing.mode === 'llm' ? 'AI' : '規則'
+        setRoutingNotice(
+          body.routing.warning ??
+            `${source}が ${body.routing.tool} を選びました。`,
+        )
+      }
       setEditRegion(null)
       setText('')
     } catch (e: unknown) {
@@ -146,6 +159,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
               ) : null}
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
                 seed {a.seed} · {a.model}
+                {a.selectedTool ? ` · ${a.selectedTool} (${a.planningMode ?? 'rules'})` : ''}
               </div>
             </div>
           )
@@ -164,6 +178,11 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         {busy ? (
           <div style={{ fontSize: 12, color: '#5b8fb9' }}>
             生成中… 1 枚 2〜3 分かかります（直列に 1 本ずつ流しています）
+          </div>
+        ) : null}
+        {routingNotice ? (
+          <div style={{ fontSize: 11, color: '#5c6b73', marginBottom: 4 }}>
+            {routingNotice}
           </div>
         ) : null}
         {error ? <div style={{ fontSize: 12, color: '#a8513f' }}>{error}</div> : null}

@@ -86,6 +86,15 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (a.maskImageLocation) {
       triple(s, iri(`${PROVISION}maskImageLocation`), literal(a.maskImageLocation))
     }
+    for (const [key, value] of [
+      ['planningMode', a.planningMode],
+      ['plannerProvider', a.plannerProvider],
+      ['plannerModel', a.plannerModel],
+      ['selectedTool', a.selectedTool],
+      ['toolArguments', a.toolArguments],
+    ] as const) {
+      if (value) triple(s, iri(`${PROVISION}${key}`), literal(value))
+    }
     if (a.provider) triple(s, iri(`${PROVISION}provider`), literal(a.provider))
     for (const [key, value] of [
       ['steps', a.steps],

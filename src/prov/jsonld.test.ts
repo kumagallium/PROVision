@@ -124,6 +124,11 @@ describe('PROV-JSONLD', () => {
       conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
       maskImageDigest: 'b'.repeat(64),
       maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      planningMode: 'llm',
+      plannerProvider: 'openai-compatible',
+      plannerModel: 'qwen2.5:3b',
+      selectedTool: 'image.erase',
+      toolArguments: '{}',
       startedAtTime: '2026-08-20T10:00:00Z',
       endedAtTime: '2026-08-20T10:00:12Z',
     })
@@ -135,6 +140,11 @@ describe('PROV-JSONLD', () => {
     expect(activity.conditioningImageLocation).toBe('images/aaaaaaaaaaaaaaaa.png')
     expect(activity.maskImageDigest).toBe('b'.repeat(64))
     expect(activity.maskImageLocation).toBe('images/bbbbbbbbbbbbbbbb.png')
+    expect(activity.planningMode).toBe('llm')
+    expect(activity.plannerProvider).toBe('openai-compatible')
+    expect(activity.plannerModel).toBe('qwen2.5:3b')
+    expect(activity.selectedTool).toBe('image.erase')
+    expect(activity.toolArguments).toBe('{}')
   })
 
   it('読み戻したグラフでも系譜を辿れる', () => {

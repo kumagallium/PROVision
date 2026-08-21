@@ -50,6 +50,13 @@ export interface GenerationActivity extends ReproducibleSpec {
   /** inpaintingで編集する領域を示す二値マスク */
   maskImageDigest?: string
   maskImageLocation?: string
+  /** ツール選択の方法と、実際に選択された許可済みツール */
+  planningMode?: 'rules' | 'llm'
+  plannerProvider?: string
+  plannerModel?: string
+  selectedTool?: string
+  /** JSON文字列。JSON-LD/N-Triplesでも同じ形を保持する */
+  toolArguments?: string
   provider?: string
   steps?: number
   guidance?: number
