@@ -1,10 +1,14 @@
 const TEXT_TERMS =
   /(文字|テキスト|ロゴ|ロゴタイプ|ロゴマーク|ワードマーク|英字|名前|text|lettering|logo|wordmark|watermark|brand)/i
 const REMOVE_TERMS =
-  /(消|削除|除去|取り除|なく|無く|remove|delete|erase|without|no\s+)/i
+  /(消|削除|除去|取り除|なく|無く|修復|補修|埋め|隠|remove|delete|erase|without|clean\s*up|heal|inpaint|no\s+)/i
+
+export function isRemovalIntent(intent: string): boolean {
+  return REMOVE_TERMS.test(intent)
+}
 
 export function isTextRemovalIntent(intent: string): boolean {
-  return TEXT_TERMS.test(intent) && REMOVE_TERMS.test(intent)
+  return TEXT_TERMS.test(intent) && isRemovalIntent(intent)
 }
 
 /**

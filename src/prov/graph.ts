@@ -63,6 +63,8 @@ export interface RecordGenerationInput {
   imageStrength?: number
   conditioningImageDigest?: string
   conditioningImageLocation?: string
+  maskImageDigest?: string
+  maskImageLocation?: string
   provider?: string
   steps?: number
   guidance?: number
@@ -208,6 +210,8 @@ export class ProvGraph {
       ...(input.conditioningImageLocation
         ? { conditioningImageLocation: input.conditioningImageLocation }
         : {}),
+      ...(input.maskImageDigest ? { maskImageDigest: input.maskImageDigest } : {}),
+      ...(input.maskImageLocation ? { maskImageLocation: input.maskImageLocation } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.steps !== undefined ? { steps: input.steps } : {}),
       ...(input.guidance !== undefined ? { guidance: input.guidance } : {}),
@@ -408,15 +412,20 @@ export class ProvGraph {
   deleteSession(root: Iri): {
     removedImages: string[]
     removedConditioningImages: string[]
+    removedMaskImages: string[]
   } {
     const doomed = new Set(this.session(root).map((e) => e.id))
     if (doomed.size === 0) throw new Error(`その会話がグラフに無い: ${root}`)
 
     const removedImages: string[] = []
     const conditioningImages = new Set<string>()
+    const maskImages = new Set<string>()
     for (const activity of this.listActivities()) {
       if (doomed.has(activity.generated) && activity.conditioningImageLocation) {
         conditioningImages.add(activity.conditioningImageLocation)
+      }
+      if (doomed.has(activity.generated) && activity.maskImageLocation) {
+        maskImages.add(activity.maskImageLocation)
       }
     }
     for (const id of doomed) {
@@ -435,10 +444,18 @@ export class ProvGraph {
         .map((activity) => activity.conditioningImageLocation)
         .filter((location): location is string => location !== undefined),
     )
+    const remainingMaskImages = new Set(
+      this.listActivities()
+        .map((activity) => activity.maskImageLocation)
+        .filter((location): location is string => location !== undefined),
+    )
     return {
       removedImages,
       removedConditioningImages: [...conditioningImages].filter(
         (location) => !remainingConditioningImages.has(location),
+      ),
+      removedMaskImages: [...maskImages].filter(
+        (location) => !remainingMaskImages.has(location),
       ),
     }
   }

@@ -42,6 +42,9 @@ pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
 
 # 実際に画像を生成しながら派生グラフを作る（mflux の量子化済み z-image-turbo が要る）
 pnpm tsx scripts/generate-lineage.ts
+
+# 選択範囲から物体・文字を消すLaMaを導入する（初回実行時に約196MBを取得）
+uv tool install --python 3.10 iopaint
 ```
 
 生成は直列で 1 枚 2〜3 分。途中で落ちても `data/run/cache/` から続きを走る
@@ -51,9 +54,15 @@ pnpm tsx scripts/generate-lineage.ts
 編集として実行する。`PROVISION_IMAGE_COMMAND` で独自コマンドを使う場合は、
 テンプレートに `{image}` と `{imageStrength}` を置く。mflux の場合は
 `--image {image} {imageStrength}` の形式を使う（`--image-strength` との併用は不可）。
-画面の「編集範囲を指定」から変更する領域を選ぶと、その領域を消去した入力画像を
-作ってから編集する。文字・ロゴに限らず、背景や図形など任意の領域を対象にでき、
-選択した入力画像も来歴に保存して再実行できるようにする。
+画面の「編集範囲を指定」から変更する領域を選べる。削除指示ではLaMaが二値マスクの
+範囲だけを周囲から補完し、それ以外の指示では従来どおり領域を消去した入力画像を
+image-to-imageへ渡す。文字・ロゴに限らず、人物・物体・傷など任意の領域を対象にでき、
+入力画像とマスクも来歴に保存するので再実行できる。
+[LaMa](https://github.com/advimman/lama)と
+[IOPaint](https://github.com/Sanster/IOPaint)はいずれもApache-2.0で、処理はMac内で完結する。
+
+独自のinpaintingコマンドは`PROVISION_INPAINT_COMMAND`で指定できる。テンプレートには
+`{image}`、`{mask}`と、出力先を示す`{out}`または`{outputDir}`が必要。
 
 ## 画面
 

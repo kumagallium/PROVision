@@ -47,6 +47,9 @@ export interface GenerationActivity extends ReproducibleSpec {
   /** 編集範囲を反映した入力画像の内容ハッシュと保存場所 */
   conditioningImageDigest?: string
   conditioningImageLocation?: string
+  /** inpaintingで編集する領域を示す二値マスク */
+  maskImageDigest?: string
+  maskImageLocation?: string
   provider?: string
   steps?: number
   guidance?: number

@@ -22,6 +22,14 @@
       "@id": "provision:conditioningImageLocation",
       "@type": "xsd:string"
     },
+    "maskImageDigest": {
+      "@id": "provision:maskImageDigest",
+      "@type": "xsd:string"
+    },
+    "maskImageLocation": {
+      "@id": "provision:maskImageLocation",
+      "@type": "xsd:string"
+    },
     "model": {
       "@id": "provision:model",
       "@type": "xsd:string"

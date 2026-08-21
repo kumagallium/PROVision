@@ -197,6 +197,8 @@ describe('後から表明したこと', () => {
       seed: 2,
       conditioningImageDigest: 'a'.repeat(64),
       conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
       derivedFrom: [root.id],
       startedAtTime: '2026-08-20T10:01:00Z',
       endedAtTime: '2026-08-20T10:01:10Z',
@@ -204,6 +206,35 @@ describe('後から表明したこと', () => {
 
     expect(g.deleteSession(root.id).removedConditioningImages).toEqual([
       'images/aaaaaaaaaaaaaaaa.png',
+    ])
+  })
+
+  it('消した会話のinpaintingマスクも対象として返る', () => {
+    const g = new ProvGraph()
+    const root = g.recordGeneration({
+      image: bytes('root'),
+      label: 'root',
+      prompt: 'p',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:10Z',
+    })
+    g.recordGeneration({
+      image: bytes('edited'),
+      label: 'edited',
+      prompt: 'edit',
+      model: 'big-lama',
+      seed: 0,
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      derivedFrom: [root.id],
+      startedAtTime: '2026-08-20T10:01:00Z',
+      endedAtTime: '2026-08-20T10:01:10Z',
+    })
+
+    expect(g.deleteSession(root.id).removedMaskImages).toEqual([
+      'images/bbbbbbbbbbbbbbbb.png',
     ])
   })
 

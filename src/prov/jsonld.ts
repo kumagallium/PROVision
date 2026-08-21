@@ -115,6 +115,10 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     ...(a.conditioningImageLocation
       ? { 'provision:conditioningImageLocation': lit(a.conditioningImageLocation) }
       : {}),
+    ...(a.maskImageDigest ? { 'provision:maskImageDigest': lit(a.maskImageDigest) } : {}),
+    ...(a.maskImageLocation
+      ? { 'provision:maskImageLocation': lit(a.maskImageLocation) }
+      : {}),
     ...(a.provider ? { 'provision:provider': lit(a.provider) } : {}),
     ...optionalNumber('provision:steps', a.steps, `${XSD}integer`),
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
@@ -357,6 +361,12 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(str(n, 'provision:conditioningImageLocation') !== undefined
         ? { conditioningImageLocation: str(n, 'provision:conditioningImageLocation')! }
+        : {}),
+      ...(str(n, 'provision:maskImageDigest') !== undefined
+        ? { maskImageDigest: str(n, 'provision:maskImageDigest')! }
+        : {}),
+      ...(str(n, 'provision:maskImageLocation') !== undefined
+        ? { maskImageLocation: str(n, 'provision:maskImageLocation')! }
         : {}),
       ...(str(n, 'provision:provider') !== undefined
         ? { provider: str(n, 'provision:provider')! }

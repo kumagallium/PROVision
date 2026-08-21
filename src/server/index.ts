@@ -17,7 +17,8 @@ import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
 import { cacheKeyOf, generateImage, modelIdOf, resolveImageCommand } from '../image/mflux.js'
 import { imageContentDigest } from '../image/png.js'
-import { promptForImageGeneration } from '../image/prompt.js'
+import { isRemovalIntent, promptForImageGeneration } from '../image/prompt.js'
+import { inpaintCacheKeyOf, inpaintImage } from '../image/lama.js'
 
 const DATA_DIR = resolve(process.env.PROVISION_DATA_DIR ?? 'data/run')
 const IMAGE_DIR = join(DATA_DIR, 'images')
@@ -34,7 +35,8 @@ let graph: ProvGraph = existsSync(GRAPH_PATH)
   ? await loadGraph(GRAPH_PATH)
   : new ProvGraph()
 
-const tool = graph.addAgent('mflux', 'mflux (z-image-turbo-4bit)')
+const imageTool = graph.addAgent('mflux', 'mflux (z-image-turbo-4bit)')
+const inpaintTool = graph.addAgent('lama', 'LaMa via IOPaint')
 
 /**
  * 来歴の author。**自己申告で、検証はしない。**
@@ -117,7 +119,7 @@ function decodePngDataUrl(value: string): Uint8Array {
   return new Uint8Array(bytes)
 }
 
-async function storeConditioningImage(dataUrl: string): Promise<SourceImage> {
+async function storePngDataUrl(dataUrl: string): Promise<SourceImage> {
   const bytes = decodePngDataUrl(dataUrl)
   const digest = imageContentDigest(bytes)
   const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
@@ -192,6 +194,8 @@ interface GenerateBody {
   parent?: string
   /** 利用者が指定範囲を消去した、編集用のPNG data URL */
   maskedImage?: string
+  /** 利用者が指定した編集範囲を示す二値マスクのPNG data URL */
+  maskImage?: string
   /** 人間が参照した外部リソース（asterism の IRI など） */
   referenced?: string[]
   seed?: number
@@ -261,10 +265,10 @@ app.post('/api/session/title', async (c) => {
 app.delete('/api/session', async (c) => {
   const body = (await c.req.json()) as { root?: string }
   try {
-    const { removedImages, removedConditioningImages } = graph.deleteSession(
+    const { removedImages, removedConditioningImages, removedMaskImages } = graph.deleteSession(
       String(body.root ?? ''),
     )
-    for (const location of [...removedImages, ...removedConditioningImages]) {
+    for (const location of [...removedImages, ...removedConditioningImages, ...removedMaskImages]) {
       const name = location.split('/').pop()
       // ファイル名しか使わない。data の外は触らない
       if (name && /^[0-9a-f]{8,64}\.png$/.test(name)) {
@@ -272,7 +276,10 @@ app.delete('/api/session', async (c) => {
       }
     }
     await persist()
-    return c.json({ graph: toProvJsonLd(graph), removed: removedImages.length })
+    return c.json({
+      graph: toProvJsonLd(graph),
+      removed: removedImages.length + removedConditioningImages.length + removedMaskImages.length,
+    })
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
   }
@@ -294,28 +301,43 @@ app.post('/api/rerun', async (c) => {
 
   try {
     const result = await serial(async () => {
-      const source = original.conditioningImageLocation
+      const parentSource =
+        original.used.length > 0 ? sourceImageOf(original.used[0]!) : undefined
+      const mask =
+        original.maskImageLocation && original.maskImageDigest
+          ? imageFileOf(original.maskImageLocation, original.maskImageDigest)
+          : undefined
+      const generationSource = original.conditioningImageLocation
         ? imageFileOf(
             original.conditioningImageLocation,
             original.conditioningImageDigest ?? '',
           )
-        : original.used.length > 0
-          ? sourceImageOf(original.used[0]!)
-          : undefined
-      const generated = await generateImage({
-        prompt: original.prompt,
-        seed: original.seed,
-        ...(original.width !== undefined ? { width: original.width } : {}),
-        ...(original.height !== undefined ? { height: original.height } : {}),
-        ...(original.steps !== undefined ? { steps: original.steps } : {}),
-        ...(source
-          ? {
-              imagePath: source.path,
-              imageDigest: source.digest,
-              imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH,
-            }
-          : {}),
-      })
+        : parentSource
+      if (mask && !parentSource) {
+        throw new Error('inpaintingの再実行に必要な親画像が記録されていません')
+      }
+      const generated =
+        mask && parentSource
+          ? await inpaintImage({
+              imagePath: parentSource.path,
+              imageDigest: parentSource.digest,
+              maskPath: mask.path,
+              maskDigest: mask.digest,
+            })
+          : await generateImage({
+              prompt: original.prompt,
+              seed: original.seed,
+              ...(original.width !== undefined ? { width: original.width } : {}),
+              ...(original.height !== undefined ? { height: original.height } : {}),
+              ...(original.steps !== undefined ? { steps: original.steps } : {}),
+              ...(generationSource
+                ? {
+                    imagePath: generationSource.path,
+                    imageDigest: generationSource.digest,
+                    imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH,
+                  }
+                : {}),
+            })
       const digest = imageContentDigest(generated.png)
       const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
       await writeFile(path, generated.png)
@@ -332,11 +354,19 @@ app.post('/api/rerun', async (c) => {
         ...(original.steps !== undefined ? { steps: original.steps } : {}),
         ...(original.width !== undefined ? { width: original.width } : {}),
         ...(original.height !== undefined ? { height: original.height } : {}),
-        ...(source ? { imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH } : {}),
+        ...(!mask && generationSource
+          ? { imageStrength: original.imageStrength ?? IMAGE_EDIT_STRENGTH }
+          : {}),
         ...(original.conditioningImageDigest && original.conditioningImageLocation
           ? {
               conditioningImageDigest: original.conditioningImageDigest,
               conditioningImageLocation: original.conditioningImageLocation,
+            }
+          : {}),
+        ...(original.maskImageDigest && original.maskImageLocation
+          ? {
+              maskImageDigest: original.maskImageDigest,
+              maskImageLocation: original.maskImageLocation,
             }
           : {}),
         startedAtTime: generated.startedAtTime,
@@ -346,7 +376,7 @@ app.post('/api/rerun', async (c) => {
         // 前の絵を材料にしたわけではないので派生ではない。同じものを指す別の実体
         ...(match ? {} : { alternateOf: target }),
         ...(original.referenced.length > 0 ? { referenced: original.referenced } : {}),
-        agents: [tool.id, (await personAgent()).id],
+        agents: [(mask ? inpaintTool : imageTool).id, (await personAgent()).id],
       })
       await persist()
       return { match, entity }
@@ -371,42 +401,61 @@ app.post('/api/generate', async (c) => {
 
   try {
     const source = body.parent ? sourceImageOf(body.parent) : undefined
-    if (body.maskedImage && !source) {
+    if ((body.maskedImage || body.maskImage) && !source) {
       return c.json({ error: '編集範囲を指定するには親画像が必要です' }, 400)
     }
-    const conditioningImage = body.maskedImage
-      ? await storeConditioningImage(body.maskedImage)
-      : source
     const instruction = body.intent?.trim() || body.prompt?.trim() || ''
+    const useInpainting = Boolean(body.maskImage && isRemovalIntent(instruction))
+    const maskImage =
+      useInpainting && body.maskImage ? await storePngDataUrl(body.maskImage) : undefined
+    const conditioningImage = useInpainting
+      ? undefined
+      : body.maskedImage
+        ? await storePngDataUrl(body.maskedImage)
+        : source
+    const inpaintInput =
+      useInpainting && source && maskImage
+        ? {
+            imagePath: source.path,
+            imageDigest: source.digest,
+            maskPath: maskImage.path,
+            maskDigest: maskImage.digest,
+          }
+        : undefined
     // 親画像を入力できるときは、親の全文プロンプトを次へ持ち越さない。
-    const prompt =
-      body.prompt?.trim() ||
-      promptForImageGeneration(
-        parentActivity?.prompt,
-        instruction,
-        Boolean(source),
-        Boolean(body.maskedImage),
-      )
-    const seed = Number.isInteger(body.seed)
-      ? body.seed!
-      : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
-        Number.parseInt(sha256(`${prompt}${Date.now()}`).slice(0, 8), 16) % 2 ** 31
+    const prompt = useInpainting
+      ? 'Inpaint the masked region using the surrounding image.'
+      : body.prompt?.trim() ||
+        promptForImageGeneration(
+          parentActivity?.prompt,
+          instruction,
+          Boolean(source),
+          Boolean(body.maskedImage),
+        )
+    const seed = useInpainting
+      ? 0
+      : Number.isInteger(body.seed)
+        ? body.seed!
+        : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
+          Number.parseInt(sha256(`${prompt}${Date.now()}`).slice(0, 8), 16) % 2 ** 31
 
     const entity = await serial(async () => {
-      const model = modelIdOf(resolveImageCommand())
-      const key = cacheKeyOf(
-        {
-          prompt,
-          seed,
-          ...(conditioningImage
-            ? {
-                imageDigest: conditioningImage.digest,
-                imageStrength: IMAGE_EDIT_STRENGTH,
-              }
-            : {}),
-        },
-        model,
-      )
+      const model = useInpainting ? 'big-lama' : modelIdOf(resolveImageCommand())
+      const key = inpaintInput
+        ? inpaintCacheKeyOf(inpaintInput, model)
+        : cacheKeyOf(
+            {
+              prompt,
+              seed,
+              ...(conditioningImage
+                ? {
+                    imageDigest: conditioningImage.digest,
+                    imageStrength: IMAGE_EDIT_STRENGTH,
+                  }
+                : {}),
+            },
+            model,
+          )
       const cachedPng = join(CACHE_DIR, `${key}.png`)
       const cachedMeta = join(CACHE_DIR, `${key}.json`)
 
@@ -421,17 +470,19 @@ app.post('/api/generate', async (c) => {
         const meta = JSON.parse(await readFile(cachedMeta, 'utf8'))
         result = { ...meta, png: new Uint8Array(await readFile(cachedPng)) }
       } else {
-        result = await generateImage({
-          prompt,
-          seed,
-          ...(conditioningImage
-            ? {
-                imagePath: conditioningImage.path,
-                imageDigest: conditioningImage.digest,
-                imageStrength: IMAGE_EDIT_STRENGTH,
-              }
-            : {}),
-        })
+        result = inpaintInput
+          ? await inpaintImage(inpaintInput)
+          : await generateImage({
+              prompt,
+              seed,
+              ...(conditioningImage
+                ? {
+                    imagePath: conditioningImage.path,
+                    imageDigest: conditioningImage.digest,
+                    imageStrength: IMAGE_EDIT_STRENGTH,
+                  }
+                : {}),
+            })
         await writeFile(cachedPng, result.png)
         await writeFile(
           cachedMeta,
@@ -462,14 +513,20 @@ app.post('/api/generate', async (c) => {
         model: result.model,
         provider: result.provider,
         seed,
-        steps: 8,
+        ...(!useInpainting ? { steps: 8 } : {}),
         width: 1024,
         height: 1024,
-        ...(source ? { imageStrength: IMAGE_EDIT_STRENGTH } : {}),
-        ...(body.maskedImage && conditioningImage
+        ...(!useInpainting && source ? { imageStrength: IMAGE_EDIT_STRENGTH } : {}),
+        ...(!useInpainting && body.maskedImage && conditioningImage
           ? {
               conditioningImageDigest: conditioningImage.digest,
               conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
+            }
+          : {}),
+        ...(useInpainting && maskImage
+          ? {
+              maskImageDigest: maskImage.digest,
+              maskImageLocation: `images/${maskImage.digest.slice(0, 16)}.png`,
             }
           : {}),
         startedAtTime: result.startedAtTime,
@@ -477,7 +534,7 @@ app.post('/api/generate', async (c) => {
         ...(body.intent?.trim() ? { intent: body.intent } : {}),
         ...(body.parent ? { derivedFrom: [body.parent] } : {}),
         ...(body.referenced?.length ? { referenced: body.referenced } : {}),
-        agents: [tool.id, (await personAgent()).id],
+        agents: [(useInpainting ? inpaintTool : imageTool).id, (await personAgent()).id],
       })
       await persist()
       return recorded

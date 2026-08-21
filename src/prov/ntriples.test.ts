@@ -131,6 +131,8 @@ describe('N-Triples', () => {
       imageStrength: 0.3,
       conditioningImageDigest: 'a'.repeat(64),
       conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
       startedAtTime: '2026-08-20T10:00:00Z',
       endedAtTime: '2026-08-20T10:00:12Z',
     })
@@ -141,5 +143,7 @@ describe('N-Triples', () => {
     )
     expect(lines.some((line) => line.includes('#conditioningImageDigest'))).toBe(true)
     expect(lines.some((line) => line.includes('#conditioningImageLocation'))).toBe(true)
+    expect(lines.some((line) => line.includes('#maskImageDigest'))).toBe(true)
+    expect(lines.some((line) => line.includes('#maskImageLocation'))).toBe(true)
   })
 })

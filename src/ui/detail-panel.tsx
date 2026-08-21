@@ -61,6 +61,7 @@ export function DetailPanel({
           ...(activity.conditioningImageDigest
             ? [`conditioning image: ${activity.conditioningImageDigest}`]
             : []),
+          ...(activity.maskImageDigest ? [`inpainting mask: ${activity.maskImageDigest}`] : []),
         ].join('\n')}
       </code>
 

@@ -18,6 +18,7 @@ import { AssertPanel } from './assert-panel.js'
 import { ProvImage } from './prov-image.js'
 import { apiFetch } from './api-base.js'
 import { EditRegionDialog } from './edit-region-dialog.js'
+import type { EditRegionSelection } from './edit-region-dialog.js'
 
 interface Props {
   graph: ProvGraph | null
@@ -31,7 +32,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
-  const [maskedImage, setMaskedImage] = useState<string | null>(null)
+  const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
   const chain = graph && current ? graph.lineage(current) : []
   const children = graph && current ? graph.children(current) : []
@@ -41,7 +42,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const currentImageUrl = currentEntity ? imageUrlOf(currentEntity) : undefined
 
   useEffect(() => {
-    setMaskedImage(null)
+    setEditRegion(null)
     setEditRegionOpen(false)
   }, [current])
 
@@ -57,7 +58,12 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         body: JSON.stringify({
           intent,
           ...(current ? { parent: current } : {}),
-          ...(maskedImage ? { maskedImage } : {}),
+          ...(editRegion
+            ? {
+                maskedImage: editRegion.maskedImage,
+                maskImage: editRegion.maskImage,
+              }
+            : {}),
         }),
       })
       const body = (await res.json()) as
@@ -68,7 +74,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
       }
       onGraph(body.graph)
       onSelect(body.entity.id)
-      setMaskedImage(null)
+      setEditRegion(null)
       setText('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
@@ -176,19 +182,19 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
               onClick={() => setEditRegionOpen(true)}
               style={{ padding: '5px 8px', fontSize: 11 }}
             >
-              {maskedImage ? '編集範囲を変更' : '編集範囲を指定'}
+              {editRegion ? '編集範囲を変更' : '編集範囲を指定'}
             </button>
-            {maskedImage ? (
+            {editRegion ? (
               <button
                 type="button"
-                onClick={() => setMaskedImage(null)}
+                onClick={() => setEditRegion(null)}
                 style={{ padding: '5px 8px', fontSize: 11 }}
               >
                 指定を解除
               </button>
             ) : null}
             <span style={{ fontSize: 11, color: '#7b8892' }}>
-              {maskedImage ? '範囲指定済み' : '任意の領域を選べます'}
+              {editRegion ? '範囲指定済み' : '任意の領域を選べます'}
             </span>
           </div>
         ) : null}
@@ -235,8 +241,8 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         <EditRegionDialog
           imageUrl={currentImageUrl}
           onCancel={() => setEditRegionOpen(false)}
-          onConfirm={(image) => {
-            setMaskedImage(image)
+          onConfirm={(selection) => {
+            setEditRegion(selection)
             setEditRegionOpen(false)
           }}
         />

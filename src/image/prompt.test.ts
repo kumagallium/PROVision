@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { isTextRemovalIntent, promptForImageGeneration } from './prompt.js'
+import { isRemovalIntent, isTextRemovalIntent, promptForImageGeneration } from './prompt.js'
 
 describe('画像編集用プロンプト', () => {
   it('ロゴタイプの削除指示を検出する', () => {
     expect(isTextRemovalIntent('Asterismという文字（ロゴタイプ）を消してください')).toBe(
       true,
     )
+  })
+
+  it('文字以外の削除指示も検出する', () => {
+    expect(isRemovalIntent('選択した人物を取り除いて')).toBe(true)
+    expect(isRemovalIntent('選択した傷を修復して')).toBe(true)
+    expect(isRemovalIntent('選択した部分を赤くして')).toBe(false)
   })
 
   it('親プロンプトの文字列を削除指示へ持ち込まない', () => {

@@ -122,6 +122,8 @@ describe('PROV-JSONLD', () => {
       imageStrength: 0.3,
       conditioningImageDigest: 'a'.repeat(64),
       conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
       startedAtTime: '2026-08-20T10:00:00Z',
       endedAtTime: '2026-08-20T10:00:12Z',
     })
@@ -131,6 +133,8 @@ describe('PROV-JSONLD', () => {
     expect(activity.imageStrength).toBe(0.3)
     expect(activity.conditioningImageDigest).toBe('a'.repeat(64))
     expect(activity.conditioningImageLocation).toBe('images/aaaaaaaaaaaaaaaa.png')
+    expect(activity.maskImageDigest).toBe('b'.repeat(64))
+    expect(activity.maskImageLocation).toBe('images/bbbbbbbbbbbbbbbb.png')
   })
 
   it('読み戻したグラフでも系譜を辿れる', () => {

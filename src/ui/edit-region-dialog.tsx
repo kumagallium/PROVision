@@ -10,7 +10,12 @@ interface Region {
 interface Props {
   imageUrl: string
   onCancel: () => void
-  onConfirm: (maskedImage: string) => void
+  onConfirm: (selection: EditRegionSelection) => void
+}
+
+export interface EditRegionSelection {
+  maskedImage: string
+  maskImage: string
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -133,7 +138,21 @@ export function EditRegionDialog({ imageUrl, onCancel, onConfirm }: Props) {
       : 'rgb(128, 128, 128)'
     context.fillStyle = fill
     context.fillRect(left, top, right - left, bottom - top)
-    onConfirm(output.toDataURL('image/png'))
+
+    const mask = document.createElement('canvas')
+    mask.width = size.width
+    mask.height = size.height
+    const maskContext = mask.getContext('2d')
+    if (!maskContext) return
+    maskContext.fillStyle = '#000'
+    maskContext.fillRect(0, 0, size.width, size.height)
+    maskContext.fillStyle = '#fff'
+    maskContext.fillRect(left, top, right - left, bottom - top)
+
+    onConfirm({
+      maskedImage: output.toDataURL('image/png'),
+      maskImage: mask.toDataURL('image/png'),
+    })
   }
 
   return (
