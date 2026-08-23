@@ -61,6 +61,18 @@ describe('画像編集用プロンプト', () => {
     expect(prompt).toContain('Add the exact text "asterism"')
   })
 
+  it('プランナーが推定した文字列を描画対象として使う', () => {
+    const prompt = promptForImageGeneration(
+      'a constellation logo',
+      'ロゴタイプを追加してください',
+      true,
+      false,
+      'asterism',
+    )
+    expect(prompt).toContain('Add the exact text "asterism"')
+    expect(prompt).not.toContain('Do not add')
+  })
+
   it('指定範囲だけを編集する指示を含める', () => {
     const prompt = promptForImageGeneration(undefined, '背景を消す', true, true)
     expect(prompt).toContain('Edit only the selected region')

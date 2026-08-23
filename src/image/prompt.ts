@@ -33,6 +33,8 @@ export function promptForImageGeneration(
   intent: string,
   hasSourceImage: boolean,
   hasEditRegion = false,
+  /** プランナーが文脈から推定した描画文字列。鉤括弧の明示指定より優先する */
+  renderText?: string,
 ): string {
   if (!parentPrompt || !hasSourceImage) {
     const base = parentPrompt ? `${parentPrompt}, ${intent}` : intent
@@ -51,10 +53,10 @@ export function promptForImageGeneration(
     ].join(' ')
   }
 
-  if (isTextAdditionIntent(intent)) {
+  if (renderText || isTextAdditionIntent(intent)) {
     // 追加依頼に「Do not add any text」を付けると自己矛盾し、モデルは英語の禁止文へ従う
     // （実測: ロゴタイプ追加の指示で絵がほぼ変わらなかった）。描画指示へ切り替える
-    const quoted = /[「『"“']([^」』"”']{1,40})[」』"”']/.exec(intent)?.[1]
+    const quoted = renderText ?? /[「『"“']([^」』"”']{1,40})[」』"”']/.exec(intent)?.[1]
     return [
       'Edit the input image according to this instruction:',
       intent,

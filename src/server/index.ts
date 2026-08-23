@@ -609,12 +609,26 @@ app.post('/api/generate', async (c) => {
       return c.json({ error: '編集範囲を指定するには親画像が必要です' }, 400)
     }
     const instruction = body.intent?.trim() || body.prompt?.trim() || ''
+    // 系譜のこれまでの指示（根に近い順）。製品名のような文脈は根の意図にしかない
+    const lineageIntents = body.parent
+      ? [
+          ...new Set(
+            graph
+              .lineage(body.parent)
+              .map((a) => (a.intent ?? a.prompt).trim())
+              .filter(Boolean),
+          ),
+        ]
+          .slice(0, 8)
+          .map((t) => t.slice(0, 300))
+      : []
     const planning = await planImageOperation({
       intent: instruction,
       context: {
         hasSourceImage: Boolean(source),
         hasEditRegion: Boolean(body.maskImage),
       },
+      lineage: lineageIntents,
       planner: await plannerCredentials(DATA_DIR),
     })
     const plan = planning.plan
@@ -666,6 +680,7 @@ app.post('/api/generate', async (c) => {
             instruction,
             Boolean(source),
             Boolean(body.maskedImage),
+            plan.arguments.text,
           )
         : instruction
     const usesImageModel = plan.tool === 'image.generate' || plan.tool === 'image.edit'

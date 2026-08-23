@@ -96,6 +96,34 @@ describe('画像ツールプランナー', () => {
     expect(planned.warning).toContain('未対応')
   })
 
+  it('text引数を検証して受け入れる', () => {
+    const plan = validateImagePlan(
+      { tool: 'image.edit', arguments: { text: ' asterism ' }, reason: 'add wordmark' },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.arguments.text).toBe('asterism')
+    // 文字を描けないツールでは拒否する
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.rotate', arguments: { angle: 90, text: 'x' } },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow('text')
+    // 長すぎる文字列と制御文字を拒否する
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.edit', arguments: { text: 'a'.repeat(41) } },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow('40文字')
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.edit', arguments: { text: 'a\u0000b' } },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow('40文字')
+  })
+
   it('存在しないツールと危険な引数を拒否する', () => {
     expect(() =>
       validateImagePlan(

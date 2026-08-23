@@ -16,6 +16,8 @@ export interface ImageToolArguments {
   width?: number
   height?: number
   padding?: number
+  /** 描画する文字列。image.generate / image.edit だけが受け取れる */
+  text?: string
 }
 
 export interface ImageOperationPlan {
@@ -87,6 +89,15 @@ export function validateImagePlan(
   const width = boundedInteger(sourceArgs.width, 1, 8192)
   const height = boundedInteger(sourceArgs.height, 1, 8192)
   const padding = boundedInteger(sourceArgs.padding, 0, 1024)
+  const text = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
+  if (text) {
+    if (tool !== 'image.generate' && tool !== 'image.edit') {
+      throw new Error(`${tool}はtext引数を受け取れません`)
+    }
+    if (text.length > 40 || /[\u0000-\u001f\u007f]/.test(text)) {
+      throw new Error('textは制御文字を含まない40文字以内で指定します')
+    }
+  }
   if (tool === 'image.rotate' && ![90, 180, 270].includes(angle ?? 0)) {
     throw new Error('image.rotateのangleは90、180、270のいずれかです')
   }
@@ -100,6 +111,7 @@ export function validateImagePlan(
       ...(width !== undefined ? { width } : {}),
       ...(height !== undefined ? { height } : {}),
       ...(padding !== undefined ? { padding } : {}),
+      ...(text ? { text } : {}),
     },
     reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 500) : '',
   }
@@ -248,6 +260,8 @@ async function callPlanner(
 export async function planImageOperation(input: {
   intent: string
   context: PlanningContext
+  /** 系譜のこれまでの指示（根に近い順）。製品名などの文脈推定に使う */
+  lineage?: string[]
   planner?: AiPlannerConfig & { apiKey: string }
   signal?: AbortSignal
 }): Promise<PlannedImageOperation> {
@@ -264,7 +278,7 @@ export async function planImageOperation(input: {
     'Return JSON only: {"tool":"...", "arguments":{}, "reason":"short reason"}.',
     'Allowed tools:',
     '- image.generate: create a new image when no source exists',
-    '- image.edit: generative change to an existing image',
+    '- image.edit: generative change to an existing image; when the user asks to add lettering (wordmark/logotype) and the exact name is clear from the instruction or the lineage, set arguments.text to that exact string (<=40 chars); if no name is available anywhere, omit arguments.text',
     '- image.erase: erase/heal a user-selected region; requires hasEditRegion=true',
     '- image.trim: remove or equalize surrounding margins',
     '- image.crop-square: center-crop to a square',
@@ -272,6 +286,9 @@ export async function planImageOperation(input: {
     '- image.resize: resize; arguments.width/height are pixels',
     '- background.remove: make the background transparent',
     `Context: ${JSON.stringify(input.context)}`,
+    ...(input.lineage?.length
+      ? [`Prior instructions in this lineage (oldest first): ${JSON.stringify(input.lineage)}`]
+      : []),
     `User instruction: ${JSON.stringify(input.intent)}`,
   ].join('\n')
 
