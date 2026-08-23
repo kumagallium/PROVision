@@ -1,4 +1,5 @@
 import type { AiPlannerConfig } from './config.js'
+import { resolveAiApiBase } from './provider.js'
 
 export type ImageToolName =
   | 'image.generate'
@@ -169,28 +170,14 @@ function extractJson(text: string): unknown {
   return JSON.parse(candidate)
 }
 
-function assertSafeBaseUrl(value: string): string {
-  const url = new URL(value)
-  const local = ['127.0.0.1', 'localhost', '::1'].includes(url.hostname)
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
-    throw new Error('AI API BaseはHTTPSまたはローカルホストだけ指定できます')
-  }
-  return url.toString().replace(/\/$/, '')
-}
-
 async function callPlanner(
   config: AiPlannerConfig & { apiKey: string },
   prompt: string,
+  requestSignal?: AbortSignal,
 ): Promise<string> {
-  const base = assertSafeBaseUrl(
-    config.apiBase ||
-      (config.provider === 'anthropic'
-        ? 'https://api.anthropic.com'
-        : config.provider === 'google'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.openai.com/v1'),
-  )
-  const signal = AbortSignal.timeout(30_000)
+  const base = resolveAiApiBase(config)
+  const timeout = AbortSignal.timeout(30_000)
+  const signal = requestSignal ? AbortSignal.any([requestSignal, timeout]) : timeout
   if (config.provider === 'anthropic') {
     if (!config.apiKey) throw new Error('Anthropic APIキーが設定されていません')
     const anthropicBase = base.endsWith('/v1') ? base : `${base}/v1`
@@ -262,6 +249,7 @@ export async function planImageOperation(input: {
   intent: string
   context: PlanningContext
   planner?: AiPlannerConfig & { apiKey: string }
+  signal?: AbortSignal
 }): Promise<PlannedImageOperation> {
   const deterministic = explicitRule(input.intent, input.context)
   if (deterministic) {
@@ -288,7 +276,7 @@ export async function planImageOperation(input: {
   ].join('\n')
 
   try {
-    const raw = await callPlanner(planner, prompt)
+    const raw = await callPlanner(planner, prompt, input.signal)
     return {
       plan: validateImagePlan(extractJson(raw), input.context),
       mode: 'llm',

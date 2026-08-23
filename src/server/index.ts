@@ -42,10 +42,18 @@ import {
   validateImagePlan,
 } from '../ai/planner.js'
 import {
+  modelCredentials,
   plannerCredentials,
-  publicAiPlannerConfig,
-  saveAiPlannerConfig,
+  publicAiModelRegistry,
+  registerAiModel,
+  removeAiModel,
+  updateAiModelSelection,
 } from '../ai/config.js'
+import {
+  fetchAvailableModels,
+  isAiProvider,
+  resolveAiApiBase,
+} from '../ai/provider.js'
 
 const DATA_DIR = resolve(process.env.PROVISION_DATA_DIR ?? 'data/run')
 const IMAGE_DIR = join(DATA_DIR, 'images')
@@ -228,9 +236,9 @@ app.put('/api/identity', async (c) => {
   return c.json(identity)
 })
 
-app.get('/api/ai/planner', async (c) => {
+app.get('/api/ai/models', async (c) => {
   try {
-    return c.json(await publicAiPlannerConfig(DATA_DIR))
+    return c.json(await publicAiModelRegistry(DATA_DIR))
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
   }
@@ -238,7 +246,80 @@ app.get('/api/ai/planner', async (c) => {
 
 app.put('/api/ai/planner', async (c) => {
   try {
-    return c.json(await saveAiPlannerConfig(DATA_DIR, await c.req.json()))
+    return c.json(await updateAiModelSelection(DATA_DIR, await c.req.json()))
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+app.post('/api/ai/models', async (c) => {
+  try {
+    const body = (await c.req.json()) as {
+      name?: unknown
+      provider?: unknown
+      modelId?: unknown
+      apiBase?: unknown
+      apiKey?: unknown
+    }
+    if (!isAiProvider(body.provider)) {
+      return c.json({ error: '対応していないAIプロバイダーです' }, 400)
+    }
+    return c.json(
+      await registerAiModel(DATA_DIR, {
+        name: String(body.name ?? ''),
+        provider: body.provider,
+        modelId: String(body.modelId ?? ''),
+        apiBase: resolveAiApiBase({
+          provider: body.provider,
+          apiBase: String(body.apiBase ?? ''),
+        }),
+        apiKey: String(body.apiKey ?? ''),
+      }),
+    )
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+app.delete('/api/ai/models/:id', async (c) => {
+  try {
+    return c.json(await removeAiModel(DATA_DIR, c.req.param('id')))
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+interface AiConnectionInput {
+  provider?: unknown
+  apiBase?: unknown
+  apiKey?: unknown
+  reuseModelId?: unknown
+}
+
+async function aiConnectionFromInput(body: AiConnectionInput) {
+  if (!isAiProvider(body.provider)) {
+    throw new Error('対応していないAIプロバイダーです')
+  }
+  const apiBase = String(body.apiBase ?? '').trim()
+  const normalizedApiBase = resolveAiApiBase({ provider: body.provider, apiBase })
+  let reusedApiKey = ''
+  const reuseModelId = String(body.reuseModelId ?? '').trim()
+  if (reuseModelId) {
+    const saved = await modelCredentials(DATA_DIR, reuseModelId)
+    const sameEndpoint =
+      saved.provider === body.provider && resolveAiApiBase(saved) === normalizedApiBase
+    if (!sameEndpoint) throw new Error('保存済みモデルと接続先が一致しません')
+    reusedApiKey = saved.apiKey
+  }
+  const apiKey = String(body.apiKey ?? '').trim() || reusedApiKey
+  return { provider: body.provider, apiBase: normalizedApiBase, apiKey }
+}
+
+app.post('/api/ai/planner/models', async (c) => {
+  try {
+    const connection = await aiConnectionFromInput((await c.req.json()) as AiConnectionInput)
+    const models = await fetchAvailableModels({ ...connection, signal: c.req.raw.signal })
+    return c.json({ models })
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
   }
@@ -246,12 +327,20 @@ app.put('/api/ai/planner', async (c) => {
 
 app.post('/api/ai/planner/test', async (c) => {
   try {
+    const body = (await c.req.json()) as AiConnectionInput & { modelId?: unknown }
+    const connection = await aiConnectionFromInput(body)
+    const modelId = String(body.modelId ?? '').trim()
+    if (!modelId) return c.json({ error: '接続テストするモデルを選んでください' }, 400)
     const planned = await planImageOperation({
       intent: 'Make the existing image slightly warmer without changing its composition.',
       context: { hasSourceImage: true, hasEditRegion: false },
-      planner: await plannerCredentials(DATA_DIR),
+      planner: { ...connection, enabled: true, modelId },
+      signal: c.req.raw.signal,
     })
     if (planned.warning) return c.json({ error: planned.warning }, 400)
+    if (planned.mode !== 'llm') {
+      return c.json({ error: 'AIプランナーへの接続を確認できませんでした' }, 400)
+    }
     return c.json(planned)
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
