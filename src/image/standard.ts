@@ -38,8 +38,13 @@ export async function processStandardImage(input: StandardImageInput): Promise<G
     }
     if (hasVariation) {
       image.autocrop({
-        tolerance: 0.05,
+        // colorDiff は (Δr²+Δg²+Δb²)/(255²×3)。0.05 だと各チャンネル±57まで背景扱いになり、
+        // 薄い文字やグローを飛び越えて前景まで削る（実測: 下辺だけ172px食い込んだ）。
+        // 0.001（±8/ch）は生成画像の背景ノイズ（±4〜8/ch）のすぐ上で、前景境界と1〜2pxで一致する
+        tolerance: 0.001,
         cropOnlyFrames: true,
+        // false のとき leaveBorder は「各辺ちょうどこの余白を残す」になる。
+        // true にすると削り量が対辺で揃うだけで、余白はかえって不均一になる
         cropSymmetric: false,
         leaveBorder: input.arguments.padding ?? 24,
       })
