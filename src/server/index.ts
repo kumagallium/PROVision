@@ -677,7 +677,8 @@ app.post('/api/generate', async (c) => {
         ? body.prompt?.trim() ||
           promptForImageGeneration(
             parentActivity?.prompt,
-            instruction,
+            // LLMが書き直した指示があればそちらを使う。生の言葉はintentとして別に残る
+            plan.prompt ?? instruction,
             Boolean(source),
             Boolean(body.maskedImage),
             plan.arguments.text,

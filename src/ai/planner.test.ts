@@ -96,6 +96,77 @@ describe('画像ツールプランナー', () => {
     expect(planned.warning).toContain('未対応')
   })
 
+  it('書き直しプロンプトを検証して採用する', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '{"tool":"image.edit","arguments":{"text":"asterism"},"reason":"add wordmark","prompt":"Add the wordmark \\"asterism\\" below the\\n constellation symbol."}',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+    const planned = await planImageOperation({
+      intent: 'ロゴタイプを追加してください',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      lineage: ['asterismは、埋もれていたデータという星を結ぶプロダクトのロゴ'],
+      planner: {
+        enabled: true,
+        provider: 'openai-compatible',
+        modelId: 'qwen2.5:3b',
+        apiBase: 'http://127.0.0.1:11434/v1',
+        apiKey: '',
+      },
+    })
+    expect(planned.mode).toBe('llm')
+    expect(planned.plan.arguments.text).toBe('asterism')
+    // 改行は1つの空白へ正規化される
+    expect(planned.plan.prompt).toBe('Add the wordmark "asterism" below the constellation symbol.')
+  })
+
+  it('推定したtextが書き直しから落ちた計画を拒否して規則ベースへ戻す', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '{"tool":"image.edit","arguments":{"text":"asterism"},"reason":"add","prompt":"Add a wordmark below the symbol."}',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+    const planned = await planImageOperation({
+      intent: 'ロゴタイプを追加してください',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      planner: {
+        enabled: true,
+        provider: 'openai-compatible',
+        modelId: 'local',
+        apiBase: 'http://localhost:11434/v1',
+        apiKey: '',
+      },
+    })
+    expect(planned.mode).toBe('rules')
+    expect(planned.warning).toContain('text')
+  })
+
   it('text引数を検証して受け入れる', () => {
     const plan = validateImagePlan(
       { tool: 'image.edit', arguments: { text: ' asterism ' }, reason: 'add wordmark' },
@@ -122,6 +193,15 @@ describe('画像ツールプランナー', () => {
         { hasSourceImage: true, hasEditRegion: false },
       ),
     ).toThrow('40文字')
+  })
+
+  it('文字を描けないツールの書き直しプロンプトを拒否する', () => {
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.rotate', arguments: { angle: 90 }, prompt: 'Rotate it.' },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow('prompt')
   })
 
   it('存在しないツールと危険な引数を拒否する', () => {

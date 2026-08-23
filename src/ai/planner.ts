@@ -24,6 +24,8 @@ export interface ImageOperationPlan {
   tool: ImageToolName
   arguments: ImageToolArguments
   reason: string
+  /** LLMが利用者の雑な指示を画像モデル向けに書き直した全文。image.generate / image.edit のみ */
+  prompt?: string
 }
 
 export interface PlannedImageOperation {
@@ -104,6 +106,20 @@ export function validateImagePlan(
   if (tool === 'image.resize' && width === undefined && height === undefined) {
     throw new Error('image.resizeにはwidthまたはheightが必要です')
   }
+  const rewritten =
+    typeof raw.prompt === 'string' ? raw.prompt.replace(/\s+/g, ' ').trim() : undefined
+  if (rewritten) {
+    if (tool !== 'image.generate' && tool !== 'image.edit') {
+      throw new Error(`${tool}はprompt引数を受け取れません`)
+    }
+    if (rewritten.length > 600 || /[\u0000-\u001f\u007f]/.test(rewritten)) {
+      throw new Error('promptは制御文字を含まない600文字以内で指定します')
+    }
+    // 推定した文字列が書き直しで落ちると、描画対象が失われる
+    if (text && !rewritten.includes(text)) {
+      throw new Error('promptには推定したtextをそのまま含めます')
+    }
+  }
   return {
     tool,
     arguments: {
@@ -114,6 +130,7 @@ export function validateImagePlan(
       ...(text ? { text } : {}),
     },
     reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 500) : '',
+    ...(rewritten ? { prompt: rewritten } : {}),
   }
 }
 
@@ -275,7 +292,7 @@ export async function planImageOperation(input: {
 
   const prompt = [
     'You route one image request to exactly one allowed tool.',
-    'Return JSON only: {"tool":"...", "arguments":{}, "reason":"short reason"}.',
+    'Return JSON only: {"tool":"...", "arguments":{}, "reason":"short reason", "prompt":"optional rewritten instruction"}.',
     'Allowed tools:',
     '- image.generate: create a new image when no source exists',
     '- image.edit: generative change to an existing image; when the user asks to add lettering (wordmark/logotype) and the exact name is clear from the instruction or the lineage, set arguments.text to that exact string (<=40 chars); if no name is available anywhere, omit arguments.text',
@@ -285,6 +302,9 @@ export async function planImageOperation(input: {
     '- image.rotate: rotate; arguments.angle must be 90, 180, or 270',
     '- image.resize: resize; arguments.width/height are pixels',
     '- background.remove: make the background transparent',
+    'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
+    'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
+    'If arguments.text is set, the rewritten prompt must contain that exact string.',
     `Context: ${JSON.stringify(input.context)}`,
     ...(input.lineage?.length
       ? [`Prior instructions in this lineage (oldest first): ${JSON.stringify(input.lineage)}`]
