@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { isRemovalIntent, isTextRemovalIntent, promptForImageGeneration } from './prompt.js'
+import {
+  isRemovalIntent,
+  isTextAdditionIntent,
+  isTextRemovalIntent,
+  promptForImageGeneration,
+} from './prompt.js'
 
 describe('画像編集用プロンプト', () => {
   it('ロゴタイプの削除指示を検出する', () => {
@@ -28,6 +33,32 @@ describe('画像編集用プロンプト', () => {
     expect(promptForImageGeneration('base prompt', 'make it blue', false)).toBe(
       'base prompt, make it blue',
     )
+  })
+
+  it('ロゴタイプの追加指示を検出する', () => {
+    expect(isTextAdditionIntent('ロゴタイプをつけてくれますか？')).toBe(true)
+    expect(isTextAdditionIntent('「asterism」という文字を下に入れて')).toBe(true)
+    expect(isTextAdditionIntent('ロゴタイプを消して')).toBe(false)
+    expect(isTextAdditionIntent('文字を入れないで')).toBe(false)
+  })
+
+  it('追加指示では「文字を足すな」の禁止文を付けない', () => {
+    const prompt = promptForImageGeneration(
+      'a constellation logo',
+      'ロゴタイプをつけてくれますか？',
+      true,
+    )
+    expect(prompt).not.toContain('Do not add')
+    expect(prompt).toContain('Render the lettering cleanly')
+  })
+
+  it('鉤括弧で指定された文字列を描画対象として明示する', () => {
+    const prompt = promptForImageGeneration(
+      'a constellation logo',
+      '「asterism」というロゴタイプを下に付けて',
+      true,
+    )
+    expect(prompt).toContain('Add the exact text "asterism"')
   })
 
   it('指定範囲だけを編集する指示を含める', () => {

@@ -3,8 +3,21 @@ const TEXT_TERMS =
 const REMOVE_TERMS =
   /(消|削除|除去|取り除|なく|無く|修復|補修|埋め|隠|remove|delete|erase|without|clean\s*up|heal|inpaint|no\s+)/i
 
+const ADD_TERMS = /(つけ|付け|付与|追加|入れ|加え|載せ|添え|書き|描き|add|put|place|write|insert)/i
+const ADD_NEGATION = /(ないで|しないで|せずに|なしで|不要|やめて|don'?t|do\s+not|never)/i
+
 export function isRemovalIntent(intent: string): boolean {
   return REMOVE_TERMS.test(intent)
+}
+
+/** 「ロゴタイプをつけて」のような、文字・ロゴの追加指示 */
+export function isTextAdditionIntent(intent: string): boolean {
+  return (
+    TEXT_TERMS.test(intent) &&
+    ADD_TERMS.test(intent) &&
+    !isRemovalIntent(intent) &&
+    !ADD_NEGATION.test(intent)
+  )
 }
 
 export function isTextRemovalIntent(intent: string): boolean {
@@ -35,6 +48,20 @@ export function promptForImageGeneration(
       'Remove the wordmark and all lettering from the logo.',
       'Preserve the symbol, line geometry, colors, composition, and background.',
       'Do not add any text, logo, brand name, or watermark.',
+    ].join(' ')
+  }
+
+  if (isTextAdditionIntent(intent)) {
+    // 追加依頼に「Do not add any text」を付けると自己矛盾し、モデルは英語の禁止文へ従う
+    // （実測: ロゴタイプ追加の指示で絵がほぼ変わらなかった）。描画指示へ切り替える
+    const quoted = /[「『"“']([^」』"”']{1,40})[」』"”']/.exec(intent)?.[1]
+    return [
+      'Edit the input image according to this instruction:',
+      intent,
+      ...(quoted ? [`Add the exact text "${quoted}" as a clean legible wordmark.`] : []),
+      ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),
+      'Preserve the existing symbol, composition, colors, and geometry.',
+      'Render the lettering cleanly and legibly, matching the existing style.',
     ].join(' ')
   }
 
