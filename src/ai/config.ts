@@ -247,18 +247,34 @@ export async function publicAiModelRegistry(
 
 export async function registerAiModel(
   dataDir: string,
-  input: Partial<RegisteredAiModel> & { apiKey?: string },
+  input: Partial<RegisteredAiModel> & { apiKey?: string; replaceId?: string },
 ): Promise<PublicAiModelRegistry> {
   return withRegistryMutation(dataDir, async () => {
     const model = normalizeModel(input)
     if (!model) throw new Error('プロバイダーとモデルIDを指定してください')
     const registry = await readAiModelRegistry(dataDir)
+    // idは接続先とモデルIDから決まるので、編集でそれらが変わると別のidになる。
+    // 元の行を畳んでおかないと、編集したつもりで増える
+    const replaceId = clean(input.replaceId, 100)
+    const replaced = replaceId ? registry.models.find((item) => item.id === replaceId) : undefined
+    if (replaceId && !replaced) throw new Error('登録されていないAIモデルです')
+    if (replaced && replaced.id !== model.id) {
+      registry.models = registry.models.filter((item) => item.id !== replaced.id)
+      if (registry.selectedModelId === replaced.id) registry.selectedModelId = model.id
+    }
     const index = registry.models.findIndex((item) => item.id === model.id)
     if (index >= 0) registry.models[index] = model
     else registry.models.push(model)
     if (!registry.selectedModelId) registry.selectedModelId = model.id
     if (input.apiKey?.trim()) writeSecret(connectionAccount(model), input.apiKey.trim())
     await writeRegistry(dataDir, registry)
+    // 付け替えで誰も使わなくなった接続先の鍵は残さない
+    if (replaced && connectionAccount(replaced) !== connectionAccount(model)) {
+      const stillUsed = registry.models.some(
+        (item) => connectionAccount(item) === connectionAccount(replaced),
+      )
+      if (!stillUsed) writeSecret(connectionAccount(replaced), '')
+    }
     return publicAiModelRegistry(dataDir)
   })
 }

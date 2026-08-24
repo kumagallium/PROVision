@@ -125,6 +125,7 @@ export function SettingsDialog({
   const [connectionMode, setConnectionMode] = useState<'existing' | 'new'>('new')
   const [sourceModelId, setSourceModelId] = useState('')
   const [showAddModel, setShowAddModel] = useState(false)
+  const [editingModelId, setEditingModelId] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [aiApiKey, setAiApiKey] = useState('')
   const [availableModels, setAvailableModels] = useState<string[]>([])
@@ -275,6 +276,25 @@ export function SettingsDialog({
     resetModelDiscovery()
   }
 
+  /** 登録済みモデルの値をフォームへ入れて編集に入る。APIキーは伏せたまま、入れ直しだけできる */
+  function editExistingModel(id: string) {
+    const model = aiRegistry?.models.find((item) => item.id === id)
+    if (!model) return
+    setEditingModelId(id)
+    setShowAddModel(true)
+    setDeleteConfirm(null)
+    setConnectionMode('new')
+    setSourceModelId('')
+    setAiApiKey('')
+    setAiDraft({
+      name: model.name,
+      provider: model.provider,
+      modelId: model.modelId,
+      apiBase: model.apiBase,
+    })
+    resetModelDiscovery()
+  }
+
   function useNewConnection() {
     setConnectionMode('new')
     setSourceModelId('')
@@ -322,6 +342,7 @@ export function SettingsDialog({
         body: JSON.stringify({
           ...aiDraft,
           ...(aiApiKey.trim() ? { apiKey: aiApiKey } : {}),
+          ...(editingModelId ? { replaceId: editingModelId } : {}),
         }),
       })
       const value = (await response.json()) as AiModelRegistry & { error?: string }
@@ -331,6 +352,7 @@ export function SettingsDialog({
         enabled: value.enabled,
         selectedModelId: value.selectedModelId,
       })
+      setEditingModelId('')
       setShowAddModel(false)
       setAiApiKey('')
       setAvailableModels([])
@@ -708,6 +730,7 @@ export function SettingsDialog({
                         onClick={() => {
                           setShowAddModel((visible) => !visible)
                           setDeleteConfirm(null)
+                          setEditingModelId('')
                           if (!showAddModel) {
                             const first = providerConnections[0]
                             if (first) useExistingConnection(first.id)
@@ -792,13 +815,22 @@ export function SettingsDialog({
                                 </button>
                               </div>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => setDeleteConfirm(model.id)}
-                                style={INPUT_BUTTON}
-                              >
-                                削除
-                              </button>
+                              <div style={{ display: 'flex', gap: 5 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => editExistingModel(model.id)}
+                                  style={INPUT_BUTTON}
+                                >
+                                  編集
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteConfirm(model.id)}
+                                  style={INPUT_BUTTON}
+                                >
+                                  削除
+                                </button>
+                              </div>
                             )}
                           </div>
                         ))}
@@ -816,8 +848,15 @@ export function SettingsDialog({
                         background: PALETTE.image.bg,
                       }}
                     >
-                      <strong style={{ fontSize: 12, color: '#3f4a52' }}>モデルを追加</strong>
-                      {providerConnections.length > 0 ? (
+                      <strong style={{ fontSize: 12, color: '#3f4a52' }}>
+                        {editingModelId ? 'モデルを編集' : 'モデルを追加'}
+                      </strong>
+                      {editingModelId ? (
+                        <p style={{ fontSize: 11.5, color: '#5c6b73', margin: '6px 0 0' }}>
+                          APIキーは伏せたままです。空のまま保存すれば今の鍵を使い続けます。
+                        </p>
+                      ) : null}
+                      {!editingModelId && providerConnections.length > 0 ? (
                         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                           <button
                             type="button"
@@ -838,7 +877,9 @@ export function SettingsDialog({
                         </div>
                       ) : null}
 
-                      {connectionMode === 'existing' && providerConnections.length > 0 ? (
+                      {!editingModelId &&
+                      connectionMode === 'existing' &&
+                      providerConnections.length > 0 ? (
                         <>
                           <label style={FIELD_LABEL}>既存プロバイダー</label>
                           <select
@@ -1003,7 +1044,11 @@ export function SettingsDialog({
                           disabled={!aiDraft.modelId.trim() || aiState === 'saving'}
                           style={INPUT_BUTTON}
                         >
-                          {aiState === 'saving' ? '登録中…' : 'モデルを登録'}
+                          {aiState === 'saving'
+                            ? '保存中…'
+                            : editingModelId
+                              ? '変更を保存'
+                              : 'モデルを登録'}
                         </button>
                         <button
                           type="button"

@@ -58,6 +58,84 @@ describe('AIモデル設定', () => {
     })
   })
 
+  it('編集でモデルIDを変えても行が増えず、選択と鍵を引き継ぐ', async () => {
+    const dir = await tempDir()
+    let registry = await registerAiModel(dir, {
+      name: 'さくら',
+      provider: 'openai-compatible',
+      modelId: 'gpt-oss-120b',
+      apiBase: 'https://api.ai.sakura.ad.jp/v1',
+      apiKey: 'sakura-key',
+    })
+    const before = registry.models[0]!
+    registry = await updateAiModelSelection(dir, {
+      enabled: true,
+      selectedModelId: before.id,
+    })
+
+    // 同じ接続先のままモデルIDだけ変える＝idが変わる編集
+    registry = await registerAiModel(dir, {
+      name: 'さくら（別モデル）',
+      provider: 'openai-compatible',
+      modelId: 'gpt-oss-20b',
+      apiBase: 'https://api.ai.sakura.ad.jp/v1',
+      replaceId: before.id,
+    })
+    expect(registry.models).toHaveLength(1)
+    const after = registry.models[0]!
+    expect(after.modelId).toBe('gpt-oss-20b')
+    expect(after.id).not.toBe(before.id)
+    expect(registry.selectedModelId).toBe(after.id)
+    // 接続先が同じなので鍵は入れ直さなくても残る
+    expect(after.hasApiKey).toBe(true)
+    expect(await plannerCredentials(dir)).toMatchObject({
+      modelId: 'gpt-oss-20b',
+      apiKey: 'sakura-key',
+    })
+  })
+
+  it('編集で接続先を変えたら、誰も使わない鍵を残さない', async () => {
+    const dir = await tempDir()
+    let registry = await registerAiModel(dir, {
+      name: '旧接続',
+      provider: 'openai-compatible',
+      modelId: 'local',
+      apiBase: 'http://127.0.0.1:11434/v1',
+      apiKey: 'old-endpoint-key',
+    })
+    const before = registry.models[0]!
+    registry = await registerAiModel(dir, {
+      name: '新接続',
+      provider: 'openai-compatible',
+      modelId: 'local',
+      apiBase: 'http://127.0.0.1:8080/v1',
+      replaceId: before.id,
+      apiKey: 'new-endpoint-key',
+    })
+    expect(registry.models).toHaveLength(1)
+    expect(registry.models[0]!.apiBase).toBe('http://127.0.0.1:8080/v1')
+    // 旧接続先を作り直しても、消えた鍵は復活しない
+    const revived = await registerAiModel(dir, {
+      name: '旧接続をもう一度',
+      provider: 'openai-compatible',
+      modelId: 'local-2',
+      apiBase: 'http://127.0.0.1:11434/v1',
+    })
+    expect(revived.models.find((m) => m.modelId === 'local-2')?.hasApiKey).toBe(false)
+  })
+
+  it('存在しないモデルの差し替えを拒否する', async () => {
+    const dir = await tempDir()
+    await expect(
+      registerAiModel(dir, {
+        provider: 'openai-compatible',
+        modelId: 'local',
+        apiBase: 'http://127.0.0.1:11434/v1',
+        replaceId: 'model-does-not-exist',
+      }),
+    ).rejects.toThrow('登録されていない')
+  })
+
   it('旧単一設定を登録済みモデルへ移行する', async () => {
     const dir = await tempDir()
     await writeFile(

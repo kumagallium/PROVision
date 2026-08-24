@@ -260,6 +260,7 @@ app.post('/api/ai/models', async (c) => {
       modelId?: unknown
       apiBase?: unknown
       apiKey?: unknown
+      replaceId?: unknown
     }
     if (!isAiProvider(body.provider)) {
       return c.json({ error: '対応していないAIプロバイダーです' }, 400)
@@ -274,6 +275,7 @@ app.post('/api/ai/models', async (c) => {
           apiBase: String(body.apiBase ?? ''),
         }),
         apiKey: String(body.apiKey ?? ''),
+        replaceId: String(body.replaceId ?? ''),
       }),
     )
   } catch (error) {
