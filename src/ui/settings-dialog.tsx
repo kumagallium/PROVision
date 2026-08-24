@@ -623,6 +623,12 @@ export function SettingsDialog({
               </p>
               {aiRegistry ? (
                 <>
+                  {aiRegistry.keyStorage === 'memory' ? (
+                    <p style={{ fontSize: 12, color: '#b3541e', margin: '0 0 8px' }}>
+                      APIキーはこのプロセスのメモリにだけ置かれます。サーバを再起動すると消えるので、
+                      入れ直してください（デスクトップ版はKeychainへ保存します）。
+                    </p>
+                  ) : null}
                   <div
                     style={{
                       border: '1px solid #e0e5e8',
@@ -746,6 +752,12 @@ export function SettingsDialog({
                                     {aiRegistry.enabled ? '使用中' : '選択中（解釈は無効）'}
                                   </span>
                                 ) : null}
+                                {model.hasApiKey ? null : (
+                                  // キーはmemory保存だとサーバ再起動で消える。気づけないと401で初めて分かる
+                                  <span style={{ marginLeft: 7, color: '#b3541e' }}>
+                                    APIキー未設定
+                                  </span>
+                                )}
                               </div>
                               <div
                                 style={{

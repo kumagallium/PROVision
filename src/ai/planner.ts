@@ -267,7 +267,12 @@ async function callPlanner(
       messages: [{ role: 'user', content: prompt }],
     }),
   })
-  if (!response.ok) throw new Error(`OpenAI互換APIが失敗しました（${response.status}）`)
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('APIキーが無効か未設定です。設定のAIタブで入れ直してください')
+    }
+    throw new Error(`OpenAI互換APIが失敗しました（${response.status}）`)
+  }
   const body = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>
   }
@@ -326,7 +331,7 @@ export async function planImageOperation(input: {
       mode: 'rules',
       plannerProvider: planner.provider,
       plannerModel: planner.modelId,
-      warning: `AIによるツール選択に失敗したため規則ベースで実行します: ${
+      warning: `指示のAI解釈に失敗したため規則ベースで実行します: ${
         error instanceof Error ? error.message : String(error)
       }`,
     }
