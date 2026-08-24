@@ -1,5 +1,5 @@
 import type { AiPlannerConfig } from './config.js'
-import { isTextAdditionIntent } from '../image/prompt.js'
+import { isTextAdditionIntent, isTextRestyleIntent } from '../image/prompt.js'
 import { resolveAiApiBase } from './provider.js'
 
 export type ImageToolName =
@@ -112,12 +112,14 @@ export function validateImagePlan(
   if (tool === 'image.resize' && width === undefined && height === undefined) {
     throw new Error('image.resizeにはwidthまたはheightが必要です')
   }
+  // 画像モデルを使わないツールに書き直し文が付いてくることがある。使い道がないだけで
+  // 害はないので、弾かずに落とす（弾くと計画ごと捨てて生成側へ落ち、別物が描かれる）
+  const usesPrompt = tool === 'image.generate' || tool === 'image.edit'
   const rewritten =
-    typeof raw.prompt === 'string' ? raw.prompt.replace(/\s+/g, ' ').trim() : undefined
+    usesPrompt && typeof raw.prompt === 'string'
+      ? raw.prompt.replace(/\s+/g, ' ').trim()
+      : undefined
   if (rewritten) {
-    if (tool !== 'image.generate' && tool !== 'image.edit') {
-      throw new Error(`${tool}はprompt引数を受け取れません`)
-    }
     if (rewritten.length > 600 || /[\u0000-\u001f\u007f]/.test(rewritten)) {
       throw new Error('promptは制御文字を含まない600文字以内で指定します')
     }
@@ -153,7 +155,8 @@ function explicitRule(intent: string, context: PlanningContext): ImageOperationP
     return { tool: 'image.erase', arguments: {}, reason: '範囲指定を伴う削除・修復指示' }
   }
   const quoted = /[「『"“']([^」』"”']{1,40})[」』"”']/.exec(intent)?.[1]?.trim()
-  if (quoted && isTextAdditionIntent(intent)) {
+  // 既にある文字を整える依頼は追加ではない。確定描画で重ねると二重になる
+  if (quoted && isTextAdditionIntent(intent) && !isTextRestyleIntent(intent)) {
     // 拡散モデルは字形を崩す。文字列が分かっているならフォントで置く
     return {
       tool: 'image.wordmark',
@@ -342,7 +345,7 @@ export async function planImageOperation(input: {
     '- image.crop-square: center-crop to a square',
     '- image.rotate: rotate; arguments.angle must be 90, 180, or 270',
     '- image.resize: resize; arguments.width/height are pixels',
-    '- image.wordmark: draw a wordmark deterministically with a font under the symbol; requires arguments.text; prefer this over image.edit when the user asks to add a name or logotype and the exact string is known',
+    '- image.wordmark: append a band below the image and draw a wordmark there with a font; requires arguments.text; choose it only to ADD a name that is not in the picture yet. If the image already shows that text, or the user asks to restyle, harmonize, resize, or reposition existing lettering, choose image.edit instead — image.wordmark cannot see or change what is already drawn, so it would duplicate the text.',
     '- background.remove: make the background transparent',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
     'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',

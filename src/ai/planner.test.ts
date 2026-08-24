@@ -34,6 +34,37 @@ describe('画像ツールプランナー', () => {
     ).toBe('image.erase')
   })
 
+  it('ワードマークに書き直し文が付いてきても計画を捨てない', () => {
+    // 実測: 弾いた結果フォールバックし、生成側が無関係な文字を描いた
+    const plan = validateImagePlan(
+      {
+        tool: 'image.wordmark',
+        arguments: { text: 'asterism' },
+        reason: 'add',
+        prompt: 'Add the wordmark "asterism" below the symbol.',
+      },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.tool).toBe('image.wordmark')
+    expect(plan.arguments.text).toBe('asterism')
+    // 使い道がないので落ちる
+    expect(plan.prompt).toBeUndefined()
+  })
+
+  it('既にある文字を整える依頼は確定描画で重ねない', () => {
+    const ctx = { hasSourceImage: true, hasEditRegion: false }
+    // 実測: これでワードマークが走り、asterism が二重になった
+    expect(ruleBasedPlan('文字とロゴに統一感をもたせた形にしてください。', ctx).tool).toBe(
+      'image.edit',
+    )
+    expect(ruleBasedPlan('「asterism」の文字を少し小さくして', ctx).tool).toBe('image.edit')
+    expect(ruleBasedPlan('「asterism」のバランスを整えて', ctx).tool).toBe('image.edit')
+    // 純粋な追加は従来どおり確定描画へ
+    expect(ruleBasedPlan('「asterism」というロゴタイプを付けて', ctx).tool).toBe(
+      'image.wordmark',
+    )
+  })
+
   it('文字列のないワードマーク計画を拒否する', () => {
     expect(() =>
       validateImagePlan(
@@ -284,13 +315,13 @@ describe('画像ツールプランナー', () => {
     ).toThrow('40文字')
   })
 
-  it('文字を描けないツールの書き直しプロンプトを拒否する', () => {
-    expect(() =>
-      validateImagePlan(
-        { tool: 'image.rotate', arguments: { angle: 90 }, prompt: 'Rotate it.' },
-        { hasSourceImage: true, hasEditRegion: false },
-      ),
-    ).toThrow('prompt')
+  it('画像モデルを使わないツールでは書き直しプロンプトを落とす', () => {
+    const plan = validateImagePlan(
+      { tool: 'image.rotate', arguments: { angle: 90 }, prompt: 'Rotate it.' },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.tool).toBe('image.rotate')
+    expect(plan.prompt).toBeUndefined()
   })
 
   it('存在しないツールと危険な引数を拒否する', () => {

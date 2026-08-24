@@ -5,6 +5,13 @@ const REMOVE_TERMS =
 
 const ADD_TERMS = /(つけ|付け|付与|追加|入れ|加え|載せ|添え|書き|描き|add|put|place|write|insert)/i
 const ADD_NEGATION = /(ないで|しないで|せずに|なしで|不要|やめて|don'?t|do\s+not|never)/i
+/** 既にある文字へ手を入れる依頼。追加ではないので、確定描画で重ねてはいけない */
+const TEXT_RESTYLE_TERMS =
+  /(統一|なじ|馴染|整え|調整|バランス|揃え|そろえ|大きく|小さく|太く|細く|色|位置|動かし|寄せ|restyle|harmoni[sz]e|adjust|align|resize|reposition)/i
+
+export function isTextRestyleIntent(intent: string): boolean {
+  return TEXT_TERMS.test(intent) && TEXT_RESTYLE_TERMS.test(intent)
+}
 
 export function isRemovalIntent(intent: string): boolean {
   return REMOVE_TERMS.test(intent)
