@@ -167,6 +167,68 @@ describe('画像ツールプランナー', () => {
     expect(planned.warning).toContain('text')
   })
 
+  it('推論で本文が尽きた応答を、切れたと名指しして規則ベースへ戻す', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'We need to…' } }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+    const planned = await planImageOperation({
+      intent: 'ロゴタイプを追加してください',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      planner: {
+        enabled: true,
+        provider: 'openai-compatible',
+        modelId: 'gpt-oss-120b',
+        apiBase: 'https://api.ai.sakura.ad.jp/v1',
+        apiKey: 'k',
+      },
+    })
+    expect(planned.mode).toBe('rules')
+    expect(planned.warning).toContain('上限で切れました')
+  })
+
+  it('思考側にJSONを入れて返すモデルからも計画を取り出す', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content: '',
+                  reasoning_content: 'thinking… {"tool":"image.edit","arguments":{},"reason":"tone"}',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+    const planned = await planImageOperation({
+      intent: 'もう少し落ち着いた感じにして',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      planner: {
+        enabled: true,
+        provider: 'openai-compatible',
+        modelId: 'local',
+        apiBase: 'http://127.0.0.1:11434/v1',
+        apiKey: '',
+      },
+    })
+    expect(planned.mode).toBe('llm')
+    expect(planned.plan.tool).toBe('image.edit')
+  })
+
   it('text引数を検証して受け入れる', () => {
     const plan = validateImagePlan(
       { tool: 'image.edit', arguments: { text: ' asterism ' }, reason: 'add wordmark' },

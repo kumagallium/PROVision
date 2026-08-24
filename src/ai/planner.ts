@@ -192,10 +192,22 @@ export function ruleBasedPlan(
   )
 }
 
+/**
+ * 推論モデルは本文の前に思考でトークンを使う。300では思考だけで打ち切られ、
+ * 本文が空のまま返る（gpt-oss-120bで実測: finish_reason=length、content 0文字）。
+ */
+const PLANNER_MAX_TOKENS = 2000
+
 function extractJson(text: string): unknown {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)?.[1]
   const candidate = fenced ?? text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
-  if (!candidate.trim()) throw new Error('LLMがツール計画のJSONを返しませんでした')
+  if (!candidate.trim()) {
+    // 何が返ったか分からないと直せない。空応答と非JSON応答は原因が違う
+    const head = text.replace(/\s+/g, ' ').trim().slice(0, 120)
+    throw new Error(
+      head ? `LLMがJSONを返しませんでした: ${head}` : 'LLMが空の応答を返しました',
+    )
+  }
   return JSON.parse(candidate)
 }
 
@@ -220,7 +232,7 @@ async function callPlanner(
       },
       body: JSON.stringify({
         model: config.modelId,
-        max_tokens: 300,
+        max_tokens: PLANNER_MAX_TOKENS,
         temperature: 0,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -238,7 +250,7 @@ async function callPlanner(
         signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          generationConfig: { temperature: 0, maxOutputTokens: 300 },
+          generationConfig: { temperature: 0, maxOutputTokens: PLANNER_MAX_TOKENS },
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
         }),
       },
@@ -263,7 +275,7 @@ async function callPlanner(
     body: JSON.stringify({
       model: config.modelId,
       temperature: 0,
-      max_tokens: 300,
+      max_tokens: PLANNER_MAX_TOKENS,
       messages: [{ role: 'user', content: prompt }],
     }),
   })
@@ -274,9 +286,18 @@ async function callPlanner(
     throw new Error(`OpenAI互換APIが失敗しました（${response.status}）`)
   }
   const body = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
+    choices?: Array<{
+      finish_reason?: string
+      message?: { content?: string; reasoning_content?: string }
+    }>
   }
-  return body.choices?.[0]?.message?.content ?? ''
+  const choice = body.choices?.[0]
+  const content = choice?.message?.content ?? ''
+  if (!content && choice?.finish_reason === 'length') {
+    throw new Error('LLMの応答が上限で切れました。推論の短いモデルを選んでください')
+  }
+  // 思考側にだけJSONを入れて返すモデルがある
+  return content || (choice?.message?.reasoning_content ?? '')
 }
 
 export async function planImageOperation(input: {
