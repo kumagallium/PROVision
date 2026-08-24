@@ -299,7 +299,7 @@ export function SettingsDialog({
         }),
       })
       const value = (await response.json()) as AiModelRegistry & { error?: string }
-      if (!response.ok) throw new Error(value.error ?? 'Tool Routerの割り当てを保存できません')
+      if (!response.ok) throw new Error(value.error ?? '解釈に使うモデルを保存できません')
       setAiRegistry(value)
       setPlannerDraft({
         enabled: value.enabled,
@@ -615,10 +615,11 @@ export function SettingsDialog({
 
           {tab === 'ai' ? (
             <>
-              <label style={LABEL}>画像ツールのAI振り分け（任意）</label>
+              <label style={LABEL}>指示のAI解釈（任意）</label>
               <p style={{ fontSize: 12, color: '#5c6b73', margin: '0 0 8px' }}>
-                有効にすると、曖昧な指示で使うツールを外部またはローカルLLMが選びます。
-                未設定・接続失敗時も、規則ベースで画像編集を続けられます。
+                有効にすると、外部またはローカルのLLMが指示を解釈します。使うツールを選び、
+                会話の文脈から描く文字列を補い、画像モデル向けのプロンプトへ書き直します。
+                解釈の結果は来歴に残ります。未設定・接続失敗時も、規則ベースで画像編集を続けられます。
               </p>
               {aiRegistry ? (
                 <>
@@ -640,10 +641,10 @@ export function SettingsDialog({
                           setAiState('idle')
                         }}
                       />
-                      AIによるツール選択を有効にする
+                      AIに指示の解釈を任せる
                     </label>
 
-                    <label style={FIELD_LABEL}>Tool Routerで使うモデル</label>
+                    <label style={FIELD_LABEL}>解釈に使うモデル</label>
                     <select
                       value={plannerDraft.selectedModelId}
                       onChange={(e) => {
@@ -673,8 +674,15 @@ export function SettingsDialog({
                         ? '保存中…'
                         : aiState === 'saved'
                           ? '保存しました'
-                          : '割り当てを保存'}
+                          : '解釈の設定を保存'}
                     </button>
+                    {plannerDraft.enabled !== aiRegistry.enabled ||
+                    plannerDraft.selectedModelId !== aiRegistry.selectedModelId ? (
+                      // チェックを入れただけでは効かない。保存を押すまで解釈は切り替わらない
+                      <span style={{ marginLeft: 9, fontSize: 12, color: '#b3541e' }}>
+                        未保存の変更があります
+                      </span>
+                    ) : null}
                   </div>
 
                   <div style={{ marginTop: 16 }}>
@@ -729,8 +737,13 @@ export function SettingsDialog({
                               <div style={{ fontSize: 13, fontWeight: 600 }}>
                                 {model.name}
                                 {model.id === aiRegistry.selectedModelId ? (
-                                  <span style={{ marginLeft: 7, color: PALETTE.image.main }}>
-                                    使用中
+                                  <span
+                                    style={{
+                                      marginLeft: 7,
+                                      color: aiRegistry.enabled ? PALETTE.image.main : '#8a959b',
+                                    }}
+                                  >
+                                    {aiRegistry.enabled ? '使用中' : '選択中（解釈は無効）'}
                                   </span>
                                 ) : null}
                               </div>
