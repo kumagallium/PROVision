@@ -141,7 +141,13 @@ function sourceImageOf(entityId: string): SourceImage {
 }
 
 function isStandardTool(tool: ImageToolName): tool is StandardImageInput['tool'] {
-  return ['image.trim', 'image.crop-square', 'image.rotate', 'image.resize'].includes(tool)
+  return [
+    'image.trim',
+    'image.crop-square',
+    'image.rotate',
+    'image.resize',
+    'image.wordmark',
+  ].includes(tool)
 }
 
 function executorAgent(tool: ImageToolName) {

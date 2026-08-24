@@ -16,6 +16,33 @@ describe('画像ツールプランナー', () => {
     ).toMatchObject({ tool: 'image.resize', arguments: { width: 512, height: 256 } })
   })
 
+  it('文字列が明示された追加だけをフォント描画へ回す', () => {
+    const ctx = { hasSourceImage: true, hasEditRegion: false }
+    // 文字列が分かっているときだけ確定的に置く
+    expect(ruleBasedPlan('「asterism」というロゴタイプを付けて', ctx)).toMatchObject({
+      tool: 'image.wordmark',
+      arguments: { text: 'asterism' },
+    })
+    // 文字列が分からない追加は、従来どおり生成側へ（LLMが補える）
+    expect(ruleBasedPlan('ロゴタイプを追加してください', ctx).tool).toBe('image.edit')
+    // 引用符があっても、追加でなければ巻き込まない
+    expect(ruleBasedPlan('「asterism」の文字を消して', ctx).tool).toBe('image.edit')
+    expect(ruleBasedPlan('「青」を基調に塗り直して', ctx).tool).toBe('image.edit')
+    // 削除の明示指示は範囲指定があればLaMaのまま
+    expect(
+      ruleBasedPlan('「asterism」を消して', { hasSourceImage: true, hasEditRegion: true }).tool,
+    ).toBe('image.erase')
+  })
+
+  it('文字列のないワードマーク計画を拒否する', () => {
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.wordmark', arguments: {}, reason: 'add' },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow('文字列')
+  })
+
   it('範囲指定された削除をLaMaへ振り分ける', () => {
     expect(
       ruleBasedPlan('この文字を消して', { hasSourceImage: true, hasEditRegion: true }).tool,

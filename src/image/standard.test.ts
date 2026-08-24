@@ -22,6 +22,45 @@ async function sourceImage(): Promise<{ path: string; digest: string }> {
 }
 
 describe('標準画像処理', () => {
+  it('ワードマークは帯を継ぎ足して幅を保つ', async () => {
+    const source = await sourceImage()
+    const result = await processStandardImage({
+      tool: 'image.wordmark',
+      arguments: { text: 'asterism' },
+      imagePath: source.path,
+      imageDigest: source.digest,
+    })
+    const out = await Jimp.fromBuffer(Buffer.from(result.png))
+    expect(out.bitmap.width).toBe(100)
+    expect(out.bitmap.height).toBeGreaterThan(60)
+    expect(result.model).toBe('jimp-1.6.1')
+  })
+
+  it('同じ文字列なら同じ絵になる（決定的）', async () => {
+    const source = await sourceImage()
+    const input = {
+      tool: 'image.wordmark' as const,
+      arguments: { text: 'asterism' },
+      imagePath: source.path,
+      imageDigest: source.digest,
+    }
+    const a = await processStandardImage(input)
+    const b = await processStandardImage(input)
+    expect(sha256(a.png)).toBe(sha256(b.png))
+  })
+
+  it('文字列がないワードマークを拒否する', async () => {
+    const source = await sourceImage()
+    await expect(
+      processStandardImage({
+        tool: 'image.wordmark',
+        arguments: {},
+        imagePath: source.path,
+        imageDigest: source.digest,
+      }),
+    ).rejects.toThrow('文字列')
+  })
+
   it('中央を正方形に切り抜く', async () => {
     const source = await sourceImage()
     const result = await processStandardImage({

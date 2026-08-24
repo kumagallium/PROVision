@@ -1,4 +1,5 @@
 import type { AiPlannerConfig } from './config.js'
+import { isTextAdditionIntent } from '../image/prompt.js'
 import { resolveAiApiBase } from './provider.js'
 
 export type ImageToolName =
@@ -9,6 +10,7 @@ export type ImageToolName =
   | 'image.crop-square'
   | 'image.rotate'
   | 'image.resize'
+  | 'image.wordmark'
   | 'background.remove'
 
 export interface ImageToolArguments {
@@ -49,6 +51,7 @@ const TOOL_NAMES = new Set<ImageToolName>([
   'image.crop-square',
   'image.rotate',
   'image.resize',
+  'image.wordmark',
   'background.remove',
 ])
 
@@ -92,8 +95,11 @@ export function validateImagePlan(
   const height = boundedInteger(sourceArgs.height, 1, 8192)
   const padding = boundedInteger(sourceArgs.padding, 0, 1024)
   const text = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
+  if (tool === 'image.wordmark' && !text) {
+    throw new Error('image.wordmarkには描く文字列（text）が必要です')
+  }
   if (text) {
-    if (tool !== 'image.generate' && tool !== 'image.edit') {
+    if (tool !== 'image.generate' && tool !== 'image.edit' && tool !== 'image.wordmark') {
       throw new Error(`${tool}はtext引数を受け取れません`)
     }
     if (text.length > 40 || /[\u0000-\u001f\u007f]/.test(text)) {
@@ -145,6 +151,15 @@ function explicitRule(intent: string, context: PlanningContext): ImageOperationP
     )
   ) {
     return { tool: 'image.erase', arguments: {}, reason: '範囲指定を伴う削除・修復指示' }
+  }
+  const quoted = /[「『"“']([^」』"”']{1,40})[」』"”']/.exec(intent)?.[1]?.trim()
+  if (quoted && isTextAdditionIntent(intent)) {
+    // 拡散モデルは字形を崩す。文字列が分かっているならフォントで置く
+    return {
+      tool: 'image.wordmark',
+      arguments: { text: quoted },
+      reason: '描く文字列が明示された文字追加の指示',
+    }
   }
   if (/(背景).*(透明|透過)|(透明|透過).*(背景)|remove\s+background/i.test(intent)) {
     return { tool: 'background.remove', arguments: {}, reason: '背景透明化の明示指示' }
@@ -327,6 +342,7 @@ export async function planImageOperation(input: {
     '- image.crop-square: center-crop to a square',
     '- image.rotate: rotate; arguments.angle must be 90, 180, or 270',
     '- image.resize: resize; arguments.width/height are pixels',
+    '- image.wordmark: draw a wordmark deterministically with a font under the symbol; requires arguments.text; prefer this over image.edit when the user asks to add a name or logotype and the exact string is known',
     '- background.remove: make the background transparent',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
     'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
