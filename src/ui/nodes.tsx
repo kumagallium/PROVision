@@ -44,7 +44,15 @@ export function ImageNode({ data, selected }: NodeProps) {
         <ProvImage
           path={d.imageUrl}
           alt={d.label}
-          style={{ display: 'block', width: 168, height: 168, objectFit: 'cover' }}
+          // 正方形に切り抜くと、ワードマークを継ぎ足した縦長の版で下が消える。
+          // 縦横比のまま収め、極端に細長い版だけ上限で抑える
+          style={{
+            display: 'block',
+            width: 168,
+            height: 'auto',
+            maxHeight: 260,
+            objectFit: 'contain',
+          }}
         />
       ) : (
         // 画像が無いのは記録が壊れているとき。黙って空白にせず、何の版かは言う
