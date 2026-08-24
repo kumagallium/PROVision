@@ -20,6 +20,7 @@ import {
   generateImage,
   modelIdOf,
   resolveImageCommand,
+  resolveImageEditCommand,
   type GenerateResult,
 } from '../image/mflux.js'
 import { imageContentDigest, pngDimensions } from '../image/png.js'
@@ -718,7 +719,8 @@ app.post('/api/generate', async (c) => {
                       }
                     : {}),
                 },
-                modelIdOf(resolveImageCommand()),
+                // キャッシュ鍵はモデルを含む。編集は別コマンド＝別モデルなので取り違えない
+                modelIdOf(conditioningImage ? resolveImageEditCommand() : resolveImageCommand()),
               )
       const cachedPng = join(CACHE_DIR, `${key}.png`)
       const cachedMeta = join(CACHE_DIR, `${key}.json`)

@@ -54,7 +54,10 @@ uv tool install --python 3.11 "rembg[cpu,cli]"
 （キャッシュ鍵は prompt / seed / steps / サイズ / モデル＝再現に要る情報そのもの）。
 
 画面で親画像を選んで指示すると、親画像を `--image` の入力にした image-to-image
-編集として実行する。`PROVISION_IMAGE_COMMAND` で独自コマンドを使う場合は、
+編集として実行する。編集は生成と別のコマンドを使う（編集特化モデルは入力画像を必須に取り、
+新規生成へ流用できないため）。既定では `mflux-generate-flux2-edit` があればそれを使い、
+無ければ生成用へ落ちる。`PROVISION_IMAGE_EDIT_COMMAND` で差し替えられる。
+`PROVISION_IMAGE_COMMAND` で独自コマンドを使う場合は、
 テンプレートに `{image}` と `{imageStrength}` を置く。mflux の場合は
 `--image {image} {imageStrength}` の形式を使う（`--image-strength` との併用は不可）。
 画面の「編集範囲を指定」から変更する領域を選べる。削除指示ではLaMaが二値マスクの
@@ -72,7 +75,8 @@ image-to-imageへ渡す。文字・ロゴに限らず、人物・物体・傷な
 画像への指示は、許可済みの内部ツールから1つを選んで実行する。明示的な指示はまず
 規則ベースで処理するため、LLMを設定しなくても全経路を利用できる。
 
-- 新規生成・一般的な生成編集: mflux / z-image
+- 新規生成: mflux / z-image
+- 既存画像の生成編集: mflux / FLUX.2 Klein（編集特化。汎用の生成モデルは文字を崩す）
 - 指定範囲の消去・修復: LaMa / IOPaint
 - 余白整理・正方形切り抜き・回転・リサイズ: Jimp
 - ロゴタイプの追加: Jimp（フォントで確定的に描く。拡散モデルは字形を崩すため）

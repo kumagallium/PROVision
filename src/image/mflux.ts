@@ -84,6 +84,33 @@ export function suggestImageCommand(): string | null {
   ].join(' ')
 }
 
+/**
+ * 親画像を編集するときのコマンド。生成用と分けるのは、編集特化モデルが
+ * 入力画像を必須に取り、新規生成に使えないため（mflux-generate-flux2-edit は
+ * --image-paths が必須）。汎用の生成モデルで編集させると文字が崩れる実測がある。
+ */
+export function suggestImageEditCommand(): string | null {
+  const bin = join(homedir(), '.local', 'bin', 'mflux-generate-flux2-edit')
+  if (!existsSync(bin)) return null
+  return [
+    bin,
+    '--model flux2-klein-4b',
+    '--quantize 8',
+    '--image-paths {image}',
+    '--prompt-file {promptFile}',
+    '--seed {seed}',
+    '--steps {steps}',
+    '--output {out}',
+  ].join(' ')
+}
+
+function checkTemplate(template: string): string {
+  if (!template.includes('{out}')) {
+    throw new Error('コマンドに {out} が要る（そこへ PNG を書いてもらう）')
+  }
+  return template
+}
+
 export function resolveImageCommand(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.PROVISION_IMAGE_COMMAND?.trim()
   const template = configured || suggestImageCommand()
@@ -93,21 +120,31 @@ export function resolveImageCommand(env: NodeJS.ProcessEnv = process.env): strin
         'mflux の量子化済み z-image-turbo を ~/.cache/geologo/z-image-turbo-4bit に置く',
     )
   }
-  if (!template.includes('{out}')) {
-    throw new Error('コマンドに {out} が要る（そこへ PNG を書いてもらう）')
-  }
-  return template
+  return checkTemplate(template)
+}
+
+/** 編集用。専用コマンドが無ければ生成用へ落とす（従来どおり動く） */
+export function resolveImageEditCommand(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.PROVISION_IMAGE_EDIT_COMMAND?.trim()
+  const template = configured || suggestImageEditCommand()
+  return template ? checkTemplate(template) : resolveImageCommand(env)
 }
 
 /** モデル識別子。再現に要るので、記録できる形で返す */
 export function modelIdOf(template: string): string {
   const m = template.match(/--model\s+(\S+)/)
-  if (m) return m[1]!.split('/').pop() ?? m[1]!
-  return template.trim().split(/\s+/)[0]!.split('/').pop() ?? 'unknown'
+  const base = m
+    ? (m[1]!.split('/').pop() ?? m[1]!)
+    : (template.trim().split(/\s+/)[0]!.split('/').pop() ?? 'unknown')
+  // 同じ重みでも量子化が違えば絵が変わる。再現に要るので識別子へ畳む（D-002）。
+  // ローカルパスに 4bit のように焼き込まれている場合は二重に付けない
+  const quantize = template.match(/(?:--quantize|-q)\s+([3-8])/)?.[1]
+  if (!quantize || new RegExp(`(^|[^0-9])${quantize}bit`, 'i').test(base)) return base
+  return `${base}-q${quantize}`
 }
 
 export async function generateImage(input: GenerateInput): Promise<GenerateResult> {
-  const template = resolveImageCommand()
+  const template = input.imagePath ? resolveImageEditCommand() : resolveImageCommand()
   const width = input.width ?? 1024
   const height = input.height ?? 1024
   const steps = input.steps ?? 8
@@ -150,9 +187,10 @@ export async function generateImage(input: GenerateInput): Promise<GenerateResul
       if (templateArgs[i + 1] === '{imageStrength}') i += 1
       continue
     }
+    // flux2-edit は --image-paths、kontext は --image-path と、編集系で綴りが割れる
     if (
       !input.imagePath &&
-      arg === '--image-path' &&
+      (arg === '--image-path' || arg === '--image-paths') &&
       templateArgs[i + 1] === '{image}'
     ) {
       i += 1
