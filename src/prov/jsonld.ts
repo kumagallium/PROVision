@@ -119,6 +119,8 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     ...(a.maskImageLocation
       ? { 'provision:maskImageLocation': lit(a.maskImageLocation) }
       : {}),
+    ...(a.commandTemplate ? { 'provision:commandTemplate': lit(a.commandTemplate) } : {}),
+    ...(a.reproducibility ? { 'provision:reproducibility': lit(a.reproducibility) } : {}),
     ...(a.planningMode ? { 'provision:planningMode': lit(a.planningMode) } : {}),
     ...(a.plannerProvider ? { 'provision:plannerProvider': lit(a.plannerProvider) } : {}),
     ...(a.plannerModel ? { 'provision:plannerModel': lit(a.plannerModel) } : {}),
@@ -140,11 +142,20 @@ function activityNode(a: GenerationActivity): JsonLdNode {
   }
 }
 
+/** 読み戻しで受け付ける等級。知らない値は載せない（D-016） */
+const REPRODUCIBILITY_VALUES = ['deterministic', 'environment-dependent', 'stochastic']
+
 function agentNode(agent: ProvAgent): JsonLdNode {
   return {
     '@id': agent.id,
     '@type': agent.kind === 'SoftwareAgent' ? 'SoftwareAgent' : agent.kind,
     label: lit(agent.label),
+    ...(agent.role ? { 'provision:role': lit(agent.role) } : {}),
+    // 実測できたものだけ載せる（D-015）。空の枠を書くと「調べたが無い」と
+    // 「そもそも調べていない」が区別できなくなる
+    ...(agent.version ? { 'provision:version': lit(agent.version) } : {}),
+    ...(agent.modelFingerprint ? { 'provision:modelFingerprint': lit(agent.modelFingerprint) } : {}),
+    ...(agent.platform ? { 'provision:platform': lit(agent.platform) } : {}),
   }
 }
 
@@ -287,7 +298,23 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
           : {}),
       })
     } else if (t === 'SoftwareAgent' || t === 'Person' || t === 'Organization') {
-      agents.push({ id, label: String(firstValue(n, 'label') ?? id), kind: t })
+      agents.push({
+        id,
+        label: String(firstValue(n, 'label') ?? id),
+        kind: t,
+        ...(firstValue(n, 'provision:role') !== undefined
+          ? { role: String(firstValue(n, 'provision:role')) }
+          : {}),
+        ...(firstValue(n, 'provision:version') !== undefined
+          ? { version: String(firstValue(n, 'provision:version')) }
+          : {}),
+        ...(firstValue(n, 'provision:modelFingerprint') !== undefined
+          ? { modelFingerprint: String(firstValue(n, 'provision:modelFingerprint')) }
+          : {}),
+        ...(firstValue(n, 'provision:platform') !== undefined
+          ? { platform: String(firstValue(n, 'provision:platform')) }
+          : {}),
+      })
     } else if (t === 'Activity') {
       activityNodes.push(n)
     }
@@ -380,6 +407,17 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(str(n, 'provision:maskImageLocation') !== undefined
         ? { maskImageLocation: str(n, 'provision:maskImageLocation')! }
+        : {}),
+      ...(str(n, 'provision:commandTemplate') !== undefined
+        ? { commandTemplate: str(n, 'provision:commandTemplate')! }
+        : {}),
+      ...(REPRODUCIBILITY_VALUES.includes(str(n, 'provision:reproducibility') ?? '')
+        ? {
+            reproducibility: str(n, 'provision:reproducibility') as
+              | 'deterministic'
+              | 'environment-dependent'
+              | 'stochastic',
+          }
         : {}),
       ...(str(n, 'provision:planningMode') === 'rules' ||
       str(n, 'provision:planningMode') === 'llm'

@@ -155,3 +155,31 @@ describe('N-Triples', () => {
     expect(lines.some((line) => line.includes('#toolArguments'))).toBe(true)
   })
 })
+
+describe('実行環境と再現等級を N-Triples へ出す（D-015 / D-016）', () => {
+  it('asterism 側の SPARQL から環境と等級を引ける', () => {
+    const g = new ProvGraph()
+    const tool = g.addAgent('mflux-abc123', 'mflux 0.9.1', 'SoftwareAgent', {
+      version: '0.9.1',
+      modelFingerprint: 'f00dcafe',
+      platform: 'Mac15,8 / Apple M3 Max / macOS 15.2',
+    })
+    g.recordGeneration({
+      image: new TextEncoder().encode('nt-env'),
+      label: '環境つきの版',
+      prompt: 'a diagram',
+      model: 'z-image-turbo-4bit',
+      seed: 7,
+      reproducibility: 'stochastic',
+      startedAtTime: '2026-08-25T10:00:00Z',
+      endedAtTime: '2026-08-25T10:00:12Z',
+      agents: [tool.id],
+    })
+
+    const text = toNTriples(g).join('\n')
+    expect(text).toMatch(/version>\s+"0\.9\.1"/)
+    expect(text).toMatch(/modelFingerprint>\s+"f00dcafe"/)
+    expect(text).toMatch(/platform>\s+"Mac15,8 \/ Apple M3 Max \/ macOS 15\.2"/)
+    expect(text).toMatch(/reproducibility>\s+"stochastic"/)
+  })
+})

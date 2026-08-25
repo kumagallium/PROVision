@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ProvGraph, UnchangedImageError } from '../prov/graph.js'
-import { imageToolExecutor } from '../ai/tools.js'
+import { imageToolExecutor, imageToolReproducibility } from '../ai/tools.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
 import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
@@ -24,6 +24,9 @@ import {
   resolveImageEditCommand,
   type GenerateResult,
 } from '../image/mflux.js'
+import { probePlatform } from '../image/environment.js'
+import { addSoftwareAgent, commandTemplateOf, probeToolEnvironment } from './agents.js'
+import { resolveInpaintCommand } from '../image/lama.js'
 import { imageContentDigest, pngDimensions } from '../image/png.js'
 import { promptForImageGeneration } from '../image/prompt.js'
 import { inpaintCacheKeyOf, inpaintImage } from '../image/lama.js'
@@ -72,10 +75,47 @@ let graph: ProvGraph = existsSync(GRAPH_PATH)
   ? await loadGraph(GRAPH_PATH)
   : new ProvGraph()
 
-const imageTool = graph.addAgent('mflux', 'mflux (z-image-turbo-4bit)')
-const inpaintTool = graph.addAgent('lama', 'LaMa via IOPaint')
-const standardTool = graph.addAgent('jimp', 'Jimp standard image processing')
-const backgroundTool = graph.addAgent('rembg', 'rembg (U²-Net)')
+/**
+ * この PC の機種・チップ・OS。起動時に 1 回だけ実測する（D-015）。
+ * 取れなければ `undefined` のままで、その場合は来歴に書かない。
+ */
+const PLATFORM = await probePlatform()
+
+/** コマンド雛形の解決先。差し替え可能な形で 1 か所にまとめる */
+const RESOLVERS = {
+  generate: () => resolveImageCommand(),
+  edit: () => resolveImageEditCommand(),
+  inpaint: () => resolveInpaintCommand(),
+  background: () => resolveBackgroundRemovalCommand(),
+}
+
+const imageTool = addSoftwareAgent(
+  graph,
+  'mflux',
+  'mflux (z-image-turbo-4bit)',
+  await probeToolEnvironment(() => resolveImageCommand(), ['mflux', 'mlx'], PLATFORM),
+)
+const inpaintTool = addSoftwareAgent(
+  graph,
+  'lama',
+  'LaMa via IOPaint',
+  await probeToolEnvironment(() => resolveInpaintCommand(), ['iopaint', 'torch'], PLATFORM),
+)
+// Jimp はアプリに同梱されるので、版は PROVision 自身の版と一致する。
+// 確定的なツールなので platform は絵に効かないが、食い違いの切り分けには要る
+const standardTool = addSoftwareAgent(graph, 'jimp', 'Jimp standard image processing', {
+  platform: PLATFORM,
+})
+const backgroundTool = addSoftwareAgent(
+  graph,
+  'rembg',
+  'rembg (U\u00b2-Net)',
+  await probeToolEnvironment(
+    () => resolveBackgroundRemovalCommand(),
+    ['rembg', 'onnxruntime'],
+    PLATFORM,
+  ),
+)
 const rulesPlanner = graph.addAgent('image-router-rules', 'PROVision image routing rules')
 
 /**
@@ -602,6 +642,10 @@ app.post('/api/rerun', async (c) => {
         ...(original.plannerProvider ? { plannerProvider: original.plannerProvider } : {}),
         ...(original.plannerModel ? { plannerModel: original.plannerModel } : {}),
         selectedTool: tool,
+        reproducibility: imageToolReproducibility(tool),
+        ...(commandTemplateOf(tool, generationSource !== undefined, RESOLVERS)
+          ? { commandTemplate: commandTemplateOf(tool, generationSource !== undefined, RESOLVERS)! }
+          : {}),
         toolArguments: JSON.stringify(plan.arguments),
         startedAtTime: generated.startedAtTime,
         endedAtTime: generated.endedAtTime,
@@ -850,6 +894,10 @@ app.post('/api/generate', async (c) => {
         ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
         ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
         selectedTool: plan.tool,
+        reproducibility: imageToolReproducibility(plan.tool),
+        ...(commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)
+          ? { commandTemplate: commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)! }
+          : {}),
         toolArguments: JSON.stringify(plan.arguments),
         startedAtTime: result.startedAtTime,
         endedAtTime: result.endedAtTime,
