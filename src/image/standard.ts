@@ -101,7 +101,11 @@ export async function processStandardImage(input: StandardImageInput): Promise<G
       throw new Error('文字が画像の幅に収まりません。短い文字列にするか画像を広げてください')
     }
     const textHeight = measureTextHeight(font, text, width)
-    const band = Math.round(textHeight * WORDMARK_BAND_RATIO)
+    // padding は文字の上下に置く余白。指定が無ければ従来の比率で決める
+    const band =
+      input.arguments.padding !== undefined
+        ? textHeight + input.arguments.padding * 2
+        : Math.round(textHeight * WORDMARK_BAND_RATIO)
     const canvas = new Jimp({ width, height: height + band, color: background })
     canvas.blit({ src: image, x: 0, y: 0 })
     canvas.print({

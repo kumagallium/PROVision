@@ -13,6 +13,13 @@ export function isTextRestyleIntent(intent: string): boolean {
   return TEXT_TERMS.test(intent) && TEXT_RESTYLE_TERMS.test(intent)
 }
 
+/** 「ロゴとロゴタイプの間の余白」のような、絵と文字の間隔を変える依頼 */
+const GAP_TERMS = /(余白|間隔|スペース|空き|間の|あいだ|gap|spacing|margin)/i
+
+export function isWordmarkGapIntent(intent: string): boolean {
+  return TEXT_TERMS.test(intent) && GAP_TERMS.test(intent)
+}
+
 export function isRemovalIntent(intent: string): boolean {
   return REMOVE_TERMS.test(intent)
 }

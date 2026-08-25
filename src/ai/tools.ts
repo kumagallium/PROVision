@@ -118,15 +118,16 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
     name: 'image.wordmark',
     executor: 'jimp',
     purpose:
-      'append a band below the image and draw a wordmark there with a font. Requires arguments.text. Choose it to ADD a name that is not in the picture yet — the lettering comes out exact, which diffusion cannot guarantee. If the name is not stated in the instruction, take it from the lineage',
+      'append a band below the image and draw a wordmark there with a font. Requires arguments.text. Choose it to ADD a name that is not in the picture yet — the lettering comes out exact, which diffusion cannot guarantee. If the name is not stated in the instruction, take it from the lineage. Also choose it to change the gap between the artwork and a wordmark this tool drew earlier: set arguments.padding (pixels above and below the lettering) and the band is rebuilt from the original artwork, so the lettering never gets lost',
     avoidWhen:
-      'the image already shows that text, or the user asks to restyle, harmonize, resize, or reposition existing lettering — this tool cannot see what is already drawn, so it would duplicate the text. Use image.edit instead',
+      'the picture shows lettering this tool did not draw, or the user asks to restyle or recolor it — this tool cannot see what is already drawn. Use image.edit instead',
     requiresSourceImage: true,
     requiredArguments: ['text'],
-    accepts: ['text'],
+    accepts: ['text', 'padding'],
     examples: [
       { intent: '「asterism」というロゴタイプを付けて' },
       { intent: 'ロゴタイプを追加してください' },
+      { intent: 'ロゴとロゴタイプの間の余白を広げて' },
     ],
   },
   {

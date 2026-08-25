@@ -7,7 +7,11 @@ import {
   type ImageToolArgumentName,
   type ImageToolName,
 } from './tools.js'
-import { isTextAdditionIntent, isTextRestyleIntent } from '../image/prompt.js'
+import {
+  isTextAdditionIntent,
+  isTextRestyleIntent,
+  isWordmarkGapIntent,
+} from '../image/prompt.js'
 import { resolveAiApiBase } from './provider.js'
 
 export type { ImageToolName } from './tools.js'
@@ -40,6 +44,16 @@ export interface PlannedImageOperation {
 export interface PlanningContext {
   hasSourceImage: boolean
   hasEditRegion: boolean
+  /**
+   * 親画像を作ったツール。画素からは「帯と文字を足した絵」だとは分からないが、
+   * 来歴には残っている。構造を作り直せるかどうかの判断材料として渡す（D-014）
+   */
+  parentTool?: ImageToolName
+  /**
+   * 親のワードマークが描いた文字列。作り直すときに引き継ぐ。
+   * LLM は画像に何と書いてあるかを見られないので、ここが無いと落とす
+   */
+  parentText?: string
 }
 
 function boundedInteger(value: unknown, min: number, max: number): number | undefined {
@@ -86,7 +100,12 @@ export function validateImagePlan(
   const height = taken('height', boundedInteger(sourceArgs.height, 1, 8192))
   const padding = taken('padding', boundedInteger(sourceArgs.padding, 0, 1024))
   const rawText = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
-  const text = taken('text', rawText)
+  // 作り直しでは、描く文字列を来歴から補う。画素を見られないLLMは落としがち
+  const inherited =
+    !rawText && tool === 'image.wordmark' && context.parentTool === 'image.wordmark'
+      ? context.parentText?.trim()
+      : undefined
+  const text = taken('text', rawText || inherited)
   if (text && (text.length > 40 || /[\u0000-\u001f\u007f]/.test(text))) {
     throw new Error('textは制御文字を含まない40文字以内で指定します')
   }
@@ -179,10 +198,23 @@ function explicitRule(intent: string, context: PlanningContext): ImageOperationP
   if (/(正方形|square).*(切|トリミング|crop)|(切|トリミング|crop).*(正方形|square)/i.test(intent)) {
     return { tool: 'image.crop-square', arguments: {}, reason: '正方形への切り抜き指示' }
   }
-  if (/(余白).*(整|均一|詰|削)|(トリミング|trim|crop)/i.test(intent)) {
+  // 「ロゴタイプの余白」は外周ではなく要素の間。trimでは扱えないのでLLMへ預ける
+  if (
+    !isWordmarkGapIntent(intent) &&
+    /(余白).*(整|均一|詰|削)|(トリミング|trim|crop)/i.test(intent)
+  ) {
     return { tool: 'image.trim', arguments: { padding: 24 }, reason: '余白整理の指示' }
   }
   return undefined
+}
+
+/**
+ * 規則ベースでは、既にワードマークがあるかを知らない（画素を見ないため）。
+ * 「絵と文字の間の余白」は帯の作り直しで解けるが、確定させるには
+ * 親がワードマーク由来かを知る必要があるので、ここでは決めずLLMへ預ける。
+ */
+export function isWordmarkGapRequest(intent: string): boolean {
+  return isWordmarkGapIntent(intent)
 }
 
 export function ruleBasedPlan(
@@ -330,6 +362,7 @@ export async function planImageOperation(input: {
     // 一覧は定義から組み立てる。ツールを足したときの書き漏れを構造で防ぐ
     toolCatalogForPrompt(),
     'When the user asks to add lettering (wordmark/logotype), set arguments.text to the exact string (<=40 chars). Take it from the instruction, or from the lineage when the instruction does not name it. Omit arguments.text when no name is available anywhere.',
+    'Context.parentTool is the tool that produced the current picture, and Context.parentText is the lettering it drew. When parentTool is image.wordmark and the user wants to change the gap, margin, or spacing around that lettering, choose image.wordmark again: set arguments.text to Context.parentText and arguments.padding in pixels (roughly 8 for tight, 24 for default, 60 for airy). The band is rebuilt from the artwork underneath, so nothing is lost. Do not use image.edit for that — the diffusion model repaints everything and drops the lettering.',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
     'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
     'If arguments.text is set, the rewritten prompt must contain that exact string.',

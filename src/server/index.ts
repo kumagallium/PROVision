@@ -134,6 +134,17 @@ function imageFileOf(location: string, digest: string): SourceImage {
   return { path, digest }
 }
 
+/** 記録された引数を読む。壊れていても生成を止めない */
+function parsedToolArguments(raw: string | undefined): { text?: string } {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as { text?: unknown }
+    return typeof parsed.text === 'string' ? { text: parsed.text } : {}
+  } catch {
+    return {}
+  }
+}
+
 function sourceImageOf(entityId: string): SourceImage {
   const entity = graph.getEntity(entityId)
   if (!entity?.location) {
@@ -637,6 +648,13 @@ app.post('/api/generate', async (c) => {
       context: {
         hasSourceImage: Boolean(source),
         hasEditRegion: Boolean(body.maskImage),
+        // 画素からは分からない「この絵の作られ方」を渡す
+        ...(parentActivity?.selectedTool
+          ? { parentTool: parentActivity.selectedTool as ImageToolName }
+          : {}),
+        ...(parentActivity?.selectedTool === 'image.wordmark'
+          ? { parentText: parsedToolArguments(parentActivity.toolArguments).text }
+          : {}),
       },
       lineage: lineageIntents,
       planner: await plannerCredentials(DATA_DIR),
@@ -663,13 +681,31 @@ app.post('/api/generate', async (c) => {
     if (useInpainting && !inpaintInput) {
       return c.json({ error: '範囲を消去するには編集範囲のマスクが必要です' }, 400)
     }
+    /**
+     * ワードマークは帯を継ぎ足す。既に自分で帯を付けた版へもう一度かけると二重になり、
+     * 余白を変えたいだけでも作り直せない。来歴に「この版はワードマークで作った」と
+     * 残っているので、その入力画像まで戻して描き直す（D-014）。
+     */
+    const wordmarkBase =
+      plan.tool === 'image.wordmark' && parentActivity?.selectedTool === 'image.wordmark'
+        ? parentActivity.used
+            .map((id) => {
+              try {
+                return sourceImageOf(id)
+              } catch {
+                return undefined
+              }
+            })
+            .find((found) => found !== undefined)
+        : undefined
+    const standardSource = wordmarkBase ?? source
     const standardInput =
-      source && isStandardTool(plan.tool)
+      standardSource && isStandardTool(plan.tool)
         ? {
             tool: plan.tool,
             arguments: plan.arguments,
-            imagePath: source.path,
-            imageDigest: source.digest,
+            imagePath: standardSource.path,
+            imageDigest: standardSource.digest,
           }
         : undefined
     const backgroundInput =
@@ -788,6 +824,14 @@ app.post('/api/generate', async (c) => {
           ? {
               conditioningImageDigest: conditioningImage.digest,
               conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
+            }
+          : {}),
+        // 親ではなく、その奥の版から描き直したときは、実際に使った画像を残す。
+        // これが無いと、記録から同じ絵を作り直せない（D-002）
+        ...(wordmarkBase
+          ? {
+              conditioningImageDigest: wordmarkBase.digest,
+              conditioningImageLocation: `images/${wordmarkBase.digest.slice(0, 16)}.png`,
             }
           : {}),
         ...(useInpainting && maskImage

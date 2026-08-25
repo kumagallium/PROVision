@@ -27,7 +27,13 @@ const lineage = [
   'asterismは、これまで研究室や組織の中に埋もれていたデータという星を、自分たちの理解というオントロジーという星座を描くことで、AIがデータを参照できるようになる世界観のプロダクトのロゴ',
 ]
 
-const argv = process.argv.slice(2)
+// --parent=image.wordmark のように、親を作ったツールを指定できる
+const argv = process.argv.slice(2).filter((a) => !a.startsWith('--parent='))
+const parentTool = process.argv
+  .slice(2)
+  .find((a) => a.startsWith('--parent='))
+  ?.slice('--parent='.length)
+
 const cases = argv.length
   ? argv.map((intent) => ({ intent, expect: undefined as string | undefined, hasSourceImage: true, hasEditRegion: false }))
   : IMAGE_TOOLS.flatMap((tool) =>
@@ -43,7 +49,11 @@ let mismatched = 0
 for (const c of cases) {
   const planned = await planImageOperation({
     intent: c.intent,
-    context: { hasSourceImage: c.hasSourceImage, hasEditRegion: c.hasEditRegion },
+    context: {
+      hasSourceImage: c.hasSourceImage,
+      hasEditRegion: c.hasEditRegion,
+      ...(parentTool ? { parentTool: parentTool as never } : {}),
+    },
     lineage,
     planner,
   })

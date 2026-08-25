@@ -36,6 +36,23 @@ describe('標準画像処理', () => {
     expect(result.model).toBe('jimp-1.6.1')
   })
 
+  it('余白を指定すると帯の高さが変わり、文字は消えない', async () => {
+    const source = await sourceImage()
+    const make = (padding?: number) =>
+      processStandardImage({
+        tool: 'image.wordmark',
+        arguments: { text: 'asterism', ...(padding !== undefined ? { padding } : {}) },
+        imagePath: source.path,
+        imageDigest: source.digest,
+      })
+    const narrow = await Jimp.fromBuffer(Buffer.from((await make(4)).png))
+    const wide = await Jimp.fromBuffer(Buffer.from((await make(40)).png))
+    expect(wide.bitmap.height).toBeGreaterThan(narrow.bitmap.height)
+    // 元の絵の幅は変えない。継ぎ足すのは下だけ
+    expect(narrow.bitmap.width).toBe(100)
+    expect(wide.bitmap.width).toBe(100)
+  })
+
   it('同じ文字列なら同じ絵になる（決定的）', async () => {
     const source = await sourceImage()
     const input = {

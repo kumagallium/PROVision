@@ -65,6 +65,44 @@ describe('画像ツールプランナー', () => {
     )
   })
 
+  it('作り直しでは、描く文字列を来歴から引き継ぐ', () => {
+    // LLMは画像に何と書いてあるか見られない。textを落としても計画を捨てない
+    const plan = validateImagePlan(
+      { tool: 'image.wordmark', arguments: { padding: 8 }, reason: 'tighten the gap' },
+      {
+        hasSourceImage: true,
+        hasEditRegion: false,
+        parentTool: 'image.wordmark',
+        parentText: 'asterism',
+      },
+    )
+    expect(plan.arguments.text).toBe('asterism')
+    expect(plan.arguments.padding).toBe(8)
+  })
+
+  it('親がワードマークでなければ引き継がない', () => {
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.wordmark', arguments: { padding: 8 } },
+        {
+          hasSourceImage: true,
+          hasEditRegion: false,
+          parentTool: 'image.edit',
+          parentText: 'asterism',
+        },
+      ),
+    ).toThrow('描く文字列')
+  })
+
+  it('要素の間の余白は、外周のトリミングへ流さない', () => {
+    const ctx = { hasSourceImage: true, hasEditRegion: false }
+    // 実測: 「ロゴタイプの余白」がtrimへ落ち、外周だけ削られた
+    expect(ruleBasedPlan('ロゴタイプの余白を詰めて', ctx).tool).toBe('image.edit')
+    expect(ruleBasedPlan('ロゴとロゴタイプの間の余白を広げて', ctx).tool).toBe('image.edit')
+    // 外周の余白は従来どおり確定させる
+    expect(ruleBasedPlan('全体的な余白の調整をいい感じにして', ctx).tool).toBe('image.trim')
+  })
+
   it('文字列のないワードマーク計画を拒否する', () => {
     expect(() =>
       validateImagePlan(
