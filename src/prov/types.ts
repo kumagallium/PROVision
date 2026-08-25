@@ -65,6 +65,19 @@ export interface GenerationActivity extends ReproducibleSpec {
    * ツール名から引かせず、書き出したファイルに直接載せる。
    */
   reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic'
+  /**
+   * この Activity が画素をどう触ったか（D-020）。**再現の等級とは独立した軸**である。
+   * 等級が同じでも画素を作ったかどうかは違う——LaMa は乱数を使わない
+   * （`environment-dependent`）が、消した領域を周囲から描いている。
+   * 等級と同じく、ツール名から引かせず書き出したファイルに直接載せる。
+   */
+  pixelOrigin?:
+    | 'geometric'
+    | 'annotated'
+    | 'photometric'
+    | 'removed'
+    | 'synthesized'
+    | 'external'
   /** ツール選択の方法と、実際に選択された許可済みツール */
   planningMode?: 'rules' | 'llm'
   plannerProvider?: string

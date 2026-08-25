@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ProvGraph } from '../prov/graph.js'
-import { comparisonLines, reproducibilityLines } from './detail-panel.js'
+import { comparisonLines, pixelOriginLines, reproducibilityLines } from './detail-panel.js'
 
 const bytes = (s: string) => new TextEncoder().encode(s)
 
@@ -24,6 +24,7 @@ function mixedLineage() {
     seed: 0,
     selectedTool: 'image.crop-square',
     reproducibility: 'deterministic',
+    pixelOrigin: 'geometric',
     startedAtTime: '2026-08-25T10:00:00Z',
     endedAtTime: '2026-08-25T10:00:01Z',
     agents: [jimp.id],
@@ -36,6 +37,7 @@ function mixedLineage() {
     seed: 7,
     selectedTool: 'image.edit',
     reproducibility: 'stochastic',
+    pixelOrigin: 'synthesized',
     startedAtTime: '2026-08-25T10:01:00Z',
     endedAtTime: '2026-08-25T10:03:00Z',
     derivedFrom: [cropped.id],
@@ -77,6 +79,70 @@ describe('再現の範囲の表示（D-015 / D-016）', () => {
     expect(reproducibilityLines(g, old.id)).toEqual([
       '等級を記録する前の版なので、再現の範囲は分からない',
     ])
+  })
+})
+
+describe('画素の由来の表示（D-020）', () => {
+  it('画素を作っていない版は、本数と「では何をしたか」を出す', () => {
+    const { g, cropped } = mixedLineage()
+    expect(pixelOriginLines(g, cropped.id)).toEqual([
+      'この一手: 位置と大きさを変えただけで、画素は作っていない',
+      'ここまでの系譜: 1 本のうち、画素を作った手は 0 本',
+    ])
+  })
+
+  it('生成が 1 本混ざれば本数に出る。0 と「見ていない」を混ぜない', () => {
+    const { g, redrawn } = mixedLineage()
+    expect(pixelOriginLines(g, redrawn.id)).toEqual([
+      'この一手: 入力に無かった画素を作った',
+      'ここまでの系譜: 2 本のうち、画素を作った手は 1 本',
+    ])
+  })
+
+  it('取り込みを含む系譜では、手前が見えないことを必ず添える', () => {
+    const g = new ProvGraph()
+    const imported = g.recordGeneration({
+      image: bytes('imported'),
+      label: '取り込んだ版',
+      prompt: 'import',
+      model: 'import',
+      seed: 0,
+      selectedTool: 'image.import',
+      pixelOrigin: 'external',
+      startedAtTime: '2026-08-25T09:00:00Z',
+      endedAtTime: '2026-08-25T09:00:00Z',
+    })
+    const cropped = g.recordGeneration({
+      image: bytes('imported-cropped'),
+      label: '切った版',
+      prompt: 'crop',
+      model: 'jimp',
+      seed: 0,
+      selectedTool: 'image.crop-square',
+      pixelOrigin: 'geometric',
+      startedAtTime: '2026-08-25T09:01:00Z',
+      endedAtTime: '2026-08-25T09:01:01Z',
+      derivedFrom: [imported.id],
+    })
+    expect(pixelOriginLines(g, cropped.id)).toEqual([
+      'この一手: 位置と大きさを変えただけで、画素は作っていない',
+      'ここまでの系譜: 2 本のうち、画素を作った手は 0 本',
+      '取り込んだ画像より前は、この記録では見えない',
+    ])
+  })
+
+  it('由来を足す前の版は、無印を「作っていない」と読ませない', () => {
+    const g = new ProvGraph()
+    const old = g.recordGeneration({
+      image: bytes('old-origin'),
+      label: '古い版',
+      prompt: 'x',
+      model: 'z-image-turbo-4bit',
+      seed: 1,
+      startedAtTime: '2026-08-01T10:00:00Z',
+      endedAtTime: '2026-08-01T10:00:10Z',
+    })
+    expect(pixelOriginLines(g, old.id)).toEqual(['画素の由来を記録する前の版なので、分からない'])
   })
 })
 

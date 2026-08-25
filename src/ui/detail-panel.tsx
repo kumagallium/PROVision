@@ -8,8 +8,11 @@
 import type { ProvGraph } from '../prov/graph.js'
 import { alternatesOf, compareGenerations, type FieldDifference } from '../prov/compare.js'
 import {
+  PIXEL_ORIGIN_LABELS,
   REPRODUCIBILITY_LABELS,
+  lineagePixelOrigin,
   weakestReproducibility,
+  type PixelOrigin,
   type ReproducibilityGrade,
 } from '../ai/tools.js'
 
@@ -94,6 +97,9 @@ export function DetailPanel({
       <h3 style={H}>再現の範囲</h3>
       <code style={CODE}>{reproducibilityLines(graph, entityId).join('\n')}</code>
 
+      <h3 style={H}>画素の由来</h3>
+      <code style={CODE}>{pixelOriginLines(graph, entityId).join('\n')}</code>
+
       {alternatesOf(graph, entityId).map((other) => (
         <div key={other}>
           <h3 style={H}>食い違った版との差分</h3>
@@ -145,6 +151,49 @@ export function reproducibilityLines(graph: ProvGraph, entityId: string): string
     ].filter(Boolean)
     lines.push(`${agent!.label}: ${detail.join(' / ')}`)
   }
+  return lines
+}
+
+/**
+ * その版の画素がどこから来たかを言葉にする（D-020）。
+ *
+ * **再現の範囲とは別の問い**である。LaMa は乱数を使わないので等級は
+ * `environment-dependent` だが、消した領域を周囲から描いている。等級だけを見せると、
+ * 決定的に近いことが「画素を作っていない」と読まれる。
+ *
+ * **本数で出す。** 0 が「1 本も無かった」なのか「そもそも見ていない」なのか
+ * 区別できなくなるため（D-017 と同じ理由）。
+ *
+ * **「改ざんされていない」とは書かない。** 言えるのは、記録したツールのうち画素を
+ * 作るものを通ったかまでで、PROVision の外で加工されてから持ち込まれた画像に
+ * ついては何も言えない。
+ */
+export function pixelOriginLines(graph: ProvGraph, entityId: string): string[] {
+  const activity = graph.activityThatGenerated(entityId)
+  const origins = graph
+    .lineage(entityId)
+    .map((a) => a.pixelOrigin)
+    .filter((o): o is PixelOrigin => o !== undefined)
+  const summary = lineagePixelOrigin(origins)
+
+  const lines: string[] = []
+  if (activity?.pixelOrigin) {
+    lines.push(`この一手: ${PIXEL_ORIGIN_LABELS[activity.pixelOrigin]}`)
+  }
+  if (summary.counted > 0) {
+    lines.push(
+      `ここまでの系譜: ${summary.counted} 本のうち、画素を作った手は ${summary.synthesized} 本`,
+    )
+    // 0 本のときだけ「では何をしたのか」を出す。作っているなら数が答えになっている。
+    // この一手と同じなら言い直さない
+    if (summary.synthesized === 0 && summary.strongest !== activity?.pixelOrigin) {
+      lines.push(`一番強い手でも「${PIXEL_ORIGIN_LABELS[summary.strongest]}」`)
+    }
+  }
+  // 画素の由来を足す前に作った版。無印を「画素を作っていない」と読ませない
+  if (lines.length === 0) return ['画素の由来を記録する前の版なので、分からない']
+  // 取り込んだ画像より前は見ていない。ここを落とすと集計が過大主張になる（D-020）
+  if (summary.hasExternal) lines.push('取り込んだ画像より前は、この記録では見えない')
   return lines
 }
 

@@ -121,6 +121,7 @@ function activityNode(a: GenerationActivity): JsonLdNode {
       : {}),
     ...(a.commandTemplate ? { 'provision:commandTemplate': lit(a.commandTemplate) } : {}),
     ...(a.reproducibility ? { 'provision:reproducibility': lit(a.reproducibility) } : {}),
+    ...(a.pixelOrigin ? { 'provision:pixelOrigin': lit(a.pixelOrigin) } : {}),
     ...(a.planningMode ? { 'provision:planningMode': lit(a.planningMode) } : {}),
     ...(a.plannerProvider ? { 'provision:plannerProvider': lit(a.plannerProvider) } : {}),
     ...(a.plannerModel ? { 'provision:plannerModel': lit(a.plannerModel) } : {}),
@@ -144,6 +145,16 @@ function activityNode(a: GenerationActivity): JsonLdNode {
 
 /** 読み戻しで受け付ける等級。知らない値は載せない（D-016） */
 const REPRODUCIBILITY_VALUES = ['deterministic', 'environment-dependent', 'stochastic']
+
+/** 読み戻しで受け付ける画素の由来。知らない値は載せない（D-020） */
+const PIXEL_ORIGIN_VALUES = [
+  'geometric',
+  'annotated',
+  'photometric',
+  'removed',
+  'synthesized',
+  'external',
+]
 
 function agentNode(agent: ProvAgent): JsonLdNode {
   return {
@@ -417,6 +428,11 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
               | 'deterministic'
               | 'environment-dependent'
               | 'stochastic',
+          }
+        : {}),
+      ...(PIXEL_ORIGIN_VALUES.includes(str(n, 'provision:pixelOrigin') ?? '')
+        ? {
+            pixelOrigin: str(n, 'provision:pixelOrigin') as GenerationActivity['pixelOrigin'],
           }
         : {}),
       ...(str(n, 'provision:planningMode') === 'rules' ||

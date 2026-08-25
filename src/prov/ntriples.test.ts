@@ -171,6 +171,7 @@ describe('実行環境と再現等級を N-Triples へ出す（D-015 / D-016）'
       model: 'z-image-turbo-4bit',
       seed: 7,
       reproducibility: 'stochastic',
+      pixelOrigin: 'synthesized',
       startedAtTime: '2026-08-25T10:00:00Z',
       endedAtTime: '2026-08-25T10:00:12Z',
       agents: [tool.id],
@@ -181,5 +182,6 @@ describe('実行環境と再現等級を N-Triples へ出す（D-015 / D-016）'
     expect(text).toMatch(/modelFingerprint>\s+"f00dcafe"/)
     expect(text).toMatch(/platform>\s+"Mac15,8 \/ Apple M3 Max \/ macOS 15\.2"/)
     expect(text).toMatch(/reproducibility>\s+"stochastic"/)
+    expect(text).toMatch(/pixelOrigin>\s+"synthesized"/)
   })
 })
