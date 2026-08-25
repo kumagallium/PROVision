@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.1](https://github.com/kumagallium/PROVision/compare/v0.2.0...v0.2.1) - 2026-08-25
+
+- fix(image): 背景にむらがある画像で余白が削れないのを直す by @kumagallium in https://github.com/kumagallium/PROVision/pull/8
+
 ## [v0.2.0](https://github.com/kumagallium/PROVision/compare/v0.1.2...v0.2.0) - 2026-08-25
 
 - feat(image): 画像ツールを自動選択して来歴を記録 by @kumagallium in https://github.com/kumagallium/PROVision/pull/6
