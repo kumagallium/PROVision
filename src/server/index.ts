@@ -134,6 +134,15 @@ function imageFileOf(location: string, digest: string): SourceImage {
   return { path, digest }
 }
 
+/** 記録された画像を引く。消えていても生成を止めず、親から作り直させる */
+function tryImageFile(location: string, digest: string): SourceImage | undefined {
+  try {
+    return imageFileOf(location, digest)
+  } catch {
+    return undefined
+  }
+}
+
 /** 記録された引数を読む。壊れていても生成を止めない */
 function parsedToolArguments(raw: string | undefined): { text?: string } {
   if (!raw) return {}
@@ -686,17 +695,14 @@ app.post('/api/generate', async (c) => {
      * 余白を変えたいだけでも作り直せない。来歴に「この版はワードマークで作った」と
      * 残っているので、その入力画像まで戻して描き直す（D-014）。
      */
+    // 戻り先の判断は来歴が持つ（同じ判断を2か所に置くと、また片方がずれる）
+    const rebuildBase =
+      plan.tool === 'image.wordmark' && body.parent
+        ? graph.rebuildBaseOf(body.parent, 'image.wordmark')
+        : undefined
     const wordmarkBase =
-      plan.tool === 'image.wordmark' && parentActivity?.selectedTool === 'image.wordmark'
-        ? parentActivity.used
-            .map((id) => {
-              try {
-                return sourceImageOf(id)
-              } catch {
-                return undefined
-              }
-            })
-            .find((found) => found !== undefined)
+      rebuildBase?.location !== undefined
+        ? tryImageFile(rebuildBase.location, rebuildBase.digest)
         : undefined
     const standardSource = wordmarkBase ?? source
     const standardInput =

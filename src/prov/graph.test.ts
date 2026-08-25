@@ -18,6 +18,49 @@ function base(overrides: Partial<RecordGenerationInput> = {}): RecordGenerationI
 }
 
 describe('ProvGraph', () => {
+  it('作り直しを繰り返しても、戻る先は最初の元絵のまま', () => {
+    const g = new ProvGraph()
+    const art = g.recordGeneration(base({ location: 'images/art.png' }))
+    // 1回目: 元絵へ帯を足す
+    const first = g.recordGeneration(
+      base({
+        image: bytes('band-24'),
+        prompt: '「asterism」というロゴタイプを付けて',
+        model: 'jimp-1.6.1',
+        seed: 0,
+        derivedFrom: [art.id],
+        location: 'images/band24.png',
+        selectedTool: 'image.wordmark',
+        toolArguments: JSON.stringify({ text: 'asterism', padding: 24 }),
+        startedAtTime: '2026-08-20T11:00:00Z',
+        endedAtTime: '2026-08-20T11:00:01Z',
+      }),
+    )
+    expect(g.rebuildBaseOf(first.id, 'image.wordmark')?.digest).toBe(art.digest)
+
+    // 2回目: 帯を狭めて作り直す。使ったのは元絵なので、そう記録される
+    const second = g.recordGeneration(
+      base({
+        image: bytes('band-8'),
+        prompt: 'もう少し縮めてください',
+        model: 'jimp-1.6.1',
+        seed: 0,
+        derivedFrom: [first.id],
+        location: 'images/band8.png',
+        selectedTool: 'image.wordmark',
+        toolArguments: JSON.stringify({ text: 'asterism', padding: 8 }),
+        conditioningImageDigest: art.digest,
+        conditioningImageLocation: 'images/art.png',
+        startedAtTime: '2026-08-20T12:00:00Z',
+        endedAtTime: '2026-08-20T12:00:01Z',
+      }),
+    )
+    // 3回目の戻り先も元絵。画面上の親（帯付き）へ戻ると帯が重なる
+    expect(g.rebuildBaseOf(second.id, 'image.wordmark')?.digest).toBe(art.digest)
+    // 別のツールで作られた版には効かせない
+    expect(g.rebuildBaseOf(second.id, 'image.trim')).toBeUndefined()
+  })
+
   it('違う指示が同じ絵に行き着いたら、両方の Activity を繋ぐ', () => {
     const g = new ProvGraph()
     const parent = g.recordGeneration(base())

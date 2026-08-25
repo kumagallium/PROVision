@@ -161,6 +161,32 @@ export class ProvGraph {
   }
 
   /**
+   * 確定的なツールで作り直すときに使う「元絵」を返す。
+   *
+   * ワードマークは帯を継ぎ足すので、作り直しでは帯の乗っていない絵まで戻さないと
+   * 重なる。親自身が作り直しだった場合、その親が使った元絵を引き継ぐ必要がある
+   * （画面上の親には既に帯が乗っている）。連続して縮めても増えないのはこのため（D-014）。
+   */
+  rebuildBaseOf(entity: Iri, tool: string): { digest: string; location?: string } | undefined {
+    const act = this.activityThatGenerated(entity)
+    if (!act || act.selectedTool !== tool) return undefined
+    if (act.conditioningImageDigest) {
+      return {
+        digest: act.conditioningImageDigest,
+        ...(act.conditioningImageLocation ? { location: act.conditioningImageLocation } : {}),
+      }
+    }
+    const parent = act.used[0]
+    if (!parent) return undefined
+    const source = this.entities.get(parent)
+    if (!source) return undefined
+    return {
+      digest: source.digest,
+      ...(source.location ? { location: source.location } : {}),
+    }
+  }
+
+  /**
    * その画像を生んだ Activity を全部返す。
    *
    * 確定的なツールでは、違う言い方の指示が同じ絵に行き着く。内容ハッシュが同じなら
