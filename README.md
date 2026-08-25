@@ -42,10 +42,66 @@ pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
 
 # 実際に画像を生成しながら派生グラフを作る（mflux の量子化済み z-image-turbo が要る）
 pnpm tsx scripts/generate-lineage.ts
+
+# 選択範囲から物体・文字を消すLaMaを導入する（初回実行時に約196MBを取得）
+uv tool install --python 3.10 iopaint
+
+# 「背景を透明にして」を使う場合だけrembgを導入する
+uv tool install --python 3.11 "rembg[cpu,cli]"
 ```
 
 生成は直列で 1 枚 2〜3 分。途中で落ちても `data/run/cache/` から続きを走る
 （キャッシュ鍵は prompt / seed / steps / サイズ / モデル＝再現に要る情報そのもの）。
+
+画面で親画像を選んで指示すると、親画像を `--image` の入力にした image-to-image
+編集として実行する。編集は生成と別のコマンドを使う（編集特化モデルは入力画像を必須に取り、
+新規生成へ流用できないため）。既定では `mflux-generate-flux2-edit` があればそれを使い、
+無ければ生成用へ落ちる。`PROVISION_IMAGE_EDIT_COMMAND` で差し替えられる。
+`PROVISION_IMAGE_COMMAND` で独自コマンドを使う場合は、
+テンプレートに `{image}` と `{imageStrength}` を置く。mflux の場合は
+`--image {image} {imageStrength}` の形式を使う（`--image-strength` との併用は不可）。
+画面の「編集範囲を指定」から変更する領域を選べる。削除指示ではLaMaが二値マスクの
+範囲だけを周囲から補完し、それ以外の指示では従来どおり領域を消去した入力画像を
+image-to-imageへ渡す。文字・ロゴに限らず、人物・物体・傷など任意の領域を対象にでき、
+入力画像とマスクも来歴に保存するので再実行できる。
+[LaMa](https://github.com/advimman/lama)と
+[IOPaint](https://github.com/Sanster/IOPaint)はいずれもApache-2.0で、処理はMac内で完結する。
+
+独自のinpaintingコマンドは`PROVISION_INPAINT_COMMAND`で指定できる。テンプレートには
+`{image}`、`{mask}`と、出力先を示す`{out}`または`{outputDir}`が必要。
+
+### 画像ツールの振り分け
+
+画像への指示は、許可済みの内部ツールから1つを選んで実行する。明示的な指示はまず
+規則ベースで処理するため、LLMを設定しなくても全経路を利用できる。
+
+- 新規生成: mflux / z-image
+- 既存画像の生成編集: mflux / FLUX.2 Klein（編集特化。汎用の生成モデルは文字を崩す）
+- 指定範囲の消去・修復: LaMa / IOPaint
+- 余白整理・正方形切り抜き・回転・リサイズ: Jimp
+- ロゴタイプの追加: Jimp（フォントで確定的に描く。拡散モデルは字形を崩すため）
+- 背景透明化: rembg（上記の任意インストールが必要）
+
+設定画面の「指示のAI解釈」を有効にすると、規則で確定できない指示だけを
+Anthropic、OpenAI、Google Gemini、OpenAI互換APIへ送り、構造化されたツール計画を
+作らせる。OllamaはOpenAI互換として `http://127.0.0.1:11434/v1` を指定できる。
+「AI」タブでは保存済みの接続を再利用するか、新しいプロバイダーのAPI Base URLと
+APIキーを入力し、取得した利用可能モデルを複数登録できる。登録済みモデルの一覧から
+解釈に使う1件を選び、後から切り替えられる。
+LLMの出力は許可済みツール名・引数・入力条件を検証し、失敗時は画面へ理由を示して
+規則ベースへ戻す。有効時はツール選択に加えて、系譜の指示から描画する文字列
+（製品名など）を推定し、雑な指示を画像モデル向けの英語プロンプトへ書き直す。
+書き直しは翻訳と曖昧さの解消に限り、頼まれていない様式は足させない。
+実行された全文は`provision:prompt`、利用者の生の言葉は`provision:intent`として
+別々に来歴へ残るので、何を頼んで何が実行されたかは常に突き合わせられる。APIキーは`PROVISION_USE_KEYCHAIN=1`のときKeychainへ保存し、
+来歴や設定JSONへは書かない。macOSデスクトップ版は常にこの経路を通る。開発サーバーで
+同じ扱いにするなら`PROVISION_USE_KEYCHAIN=1 pnpm dev`で起動する。指定しない場合は
+平文保存せずメモリだけに保持するため、サーバーを止めると再入力が必要。どちらの状態かは
+設定画面に表示され、キー未設定のモデルにも印が付く。
+
+選択したツール、引数、規則／LLMの別、プランナーモデルはPROV来歴へ保存され、再実行でも
+同じツールを使う。Jimpとrembg本体はMIT License。rembgのモデルはアプリへ同梱せず、
+利用者が導入したローカル環境を呼び出す。
 
 ## 画面
 

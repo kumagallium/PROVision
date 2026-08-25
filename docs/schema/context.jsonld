@@ -10,6 +10,46 @@
       "@id": "provision:negativePrompt",
       "@type": "xsd:string"
     },
+    "imageStrength": {
+      "@id": "provision:imageStrength",
+      "@type": "xsd:decimal"
+    },
+    "conditioningImageDigest": {
+      "@id": "provision:conditioningImageDigest",
+      "@type": "xsd:string"
+    },
+    "conditioningImageLocation": {
+      "@id": "provision:conditioningImageLocation",
+      "@type": "xsd:string"
+    },
+    "maskImageDigest": {
+      "@id": "provision:maskImageDigest",
+      "@type": "xsd:string"
+    },
+    "maskImageLocation": {
+      "@id": "provision:maskImageLocation",
+      "@type": "xsd:string"
+    },
+    "planningMode": {
+      "@id": "provision:planningMode",
+      "@type": "xsd:string"
+    },
+    "plannerProvider": {
+      "@id": "provision:plannerProvider",
+      "@type": "xsd:string"
+    },
+    "plannerModel": {
+      "@id": "provision:plannerModel",
+      "@type": "xsd:string"
+    },
+    "selectedTool": {
+      "@id": "provision:selectedTool",
+      "@type": "xsd:string"
+    },
+    "toolArguments": {
+      "@id": "provision:toolArguments",
+      "@type": "xsd:string"
+    },
     "model": {
       "@id": "provision:model",
       "@type": "xsd:string"

@@ -66,3 +66,13 @@ export function imageContentDigest(bytes: Uint8Array): string {
   const seed = Buffer.concat([Buffer.from(header), pixels])
   return sha256(new Uint8Array(seed))
 }
+
+export function pngDimensions(
+  bytes: Uint8Array,
+): { width: number; height: number } | undefined {
+  if (!isPng(bytes) || bytes.length < 24) return undefined
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(16, false)
+  const height = view.getUint32(20, false)
+  return width > 0 && height > 0 ? { width, height } : undefined
+}

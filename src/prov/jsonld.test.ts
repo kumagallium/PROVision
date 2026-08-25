@@ -59,6 +59,42 @@ const byType = (nodes: JsonLdNode[], type: string) =>
   nodes.filter((n) => n['@type'] === type)
 
 describe('PROV-JSONLD', () => {
+  it('同じ絵に行き着いた Activity を全部 wasGeneratedBy に出す', () => {
+    const g = new ProvGraph()
+    const parent = g.recordGeneration({
+      image: new TextEncoder().encode('root'),
+      label: '根',
+      prompt: 'root',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:01Z',
+    })
+    const common = {
+      image: new TextEncoder().encode('same-output'),
+      label: 'ワードマーク',
+      model: 'jimp-1.6.1',
+      seed: 0,
+      derivedFrom: [parent.id],
+    }
+    g.recordGeneration({
+      ...common,
+      prompt: '「asterism」というロゴタイプを付けて',
+      startedAtTime: '2026-08-20T11:00:00Z',
+      endedAtTime: '2026-08-20T11:00:01Z',
+    })
+    const entity = g.recordGeneration({
+      ...common,
+      prompt: 'ロゴタイプを付けて',
+      startedAtTime: '2026-08-20T12:00:00Z',
+      endedAtTime: '2026-08-20T12:00:01Z',
+    })
+    const doc = toProvJsonLd(g) as { '@graph': Array<Record<string, unknown>> }
+    const node = doc['@graph'].find((n) => n['@id'] === entity.id)!
+    const by = node.wasGeneratedBy as Array<{ '@id': string }>
+    expect(by).toHaveLength(2)
+  })
+
   it('素の PROV を @vocab に置き、provision だけ拡張として足す', () => {
     const doc = toProvJsonLd(sampleGraph())
     const ctx = doc['@context'] as unknown[]
@@ -108,6 +144,43 @@ describe('PROV-JSONLD', () => {
     const original = sampleGraph()
     const restored = fromProvJsonLd(toProvJsonLd(original), DEFAULT_BASE)
     expect(restored.toData()).toEqual(original.toData())
+  })
+
+  it('編集用入力画像の来歴を往復できる', () => {
+    const graph = new ProvGraph()
+    graph.recordGeneration({
+      image: bytes('edited'),
+      label: '文字を消した案',
+      intent: 'ロゴタイプを消す',
+      prompt: 'Edit the selected region',
+      model: 'z-image-turbo-4bit',
+      seed: 42,
+      imageStrength: 0.3,
+      conditioningImageDigest: 'a'.repeat(64),
+      conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      planningMode: 'llm',
+      plannerProvider: 'openai-compatible',
+      plannerModel: 'qwen2.5:3b',
+      selectedTool: 'image.erase',
+      toolArguments: '{}',
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:12Z',
+    })
+
+    const restored = fromProvJsonLd(toProvJsonLd(graph), DEFAULT_BASE)
+    const activity = restored.listActivities()[0]!
+    expect(activity.imageStrength).toBe(0.3)
+    expect(activity.conditioningImageDigest).toBe('a'.repeat(64))
+    expect(activity.conditioningImageLocation).toBe('images/aaaaaaaaaaaaaaaa.png')
+    expect(activity.maskImageDigest).toBe('b'.repeat(64))
+    expect(activity.maskImageLocation).toBe('images/bbbbbbbbbbbbbbbb.png')
+    expect(activity.planningMode).toBe('llm')
+    expect(activity.plannerProvider).toBe('openai-compatible')
+    expect(activity.plannerModel).toBe('qwen2.5:3b')
+    expect(activity.selectedTool).toBe('image.erase')
+    expect(activity.toolArguments).toBe('{}')
   })
 
   it('読み戻したグラフでも系譜を辿れる', () => {

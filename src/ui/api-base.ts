@@ -10,7 +10,17 @@
 export const SIDECAR_PORT = 8788
 
 export function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  if (typeof window === 'undefined') return false
+  const internal = (
+    window as typeof window & {
+      __TAURI_INTERNALS__?: {
+        invoke?: unknown
+        metadata?: { currentWebview?: { label?: string } }
+      }
+    }
+  ).__TAURI_INTERNALS__
+  if (internal?.metadata?.currentWebview?.label?.startsWith('browser-preview-')) return false
+  return typeof internal?.invoke === 'function'
 }
 
 export function apiUrl(path: string): string {

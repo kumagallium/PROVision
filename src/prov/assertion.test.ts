@@ -176,6 +176,68 @@ describe('後から表明したこと', () => {
     expect(g.deleteSession(e.id).removedImages).toEqual(['images/abc.png'])
   })
 
+  it('消した会話の編集用入力画像も対象として返る', () => {
+    const g = new ProvGraph()
+    const root = g.recordGeneration({
+      image: bytes('root'),
+      label: 'root',
+      location: 'images/root.png',
+      prompt: 'p',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:10Z',
+    })
+    g.recordGeneration({
+      image: bytes('edited'),
+      label: 'edited',
+      location: 'images/edited.png',
+      prompt: 'edit',
+      model: 'm',
+      seed: 2,
+      conditioningImageDigest: 'a'.repeat(64),
+      conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      derivedFrom: [root.id],
+      startedAtTime: '2026-08-20T10:01:00Z',
+      endedAtTime: '2026-08-20T10:01:10Z',
+    })
+
+    expect(g.deleteSession(root.id).removedConditioningImages).toEqual([
+      'images/aaaaaaaaaaaaaaaa.png',
+    ])
+  })
+
+  it('消した会話のinpaintingマスクも対象として返る', () => {
+    const g = new ProvGraph()
+    const root = g.recordGeneration({
+      image: bytes('root'),
+      label: 'root',
+      prompt: 'p',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:10Z',
+    })
+    g.recordGeneration({
+      image: bytes('edited'),
+      label: 'edited',
+      prompt: 'edit',
+      model: 'big-lama',
+      seed: 0,
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      derivedFrom: [root.id],
+      startedAtTime: '2026-08-20T10:01:00Z',
+      endedAtTime: '2026-08-20T10:01:10Z',
+    })
+
+    expect(g.deleteSession(root.id).removedMaskImages).toEqual([
+      'images/bbbbbbbbbbbbbbbb.png',
+    ])
+  })
+
   it('JSON-LD を往復しても表示名が保たれる', () => {
     const { g, v1 } = graphWithTwoVersions()
     g.assertTitle({ root: v1.id, title: 'Asterism のロゴ', at: '2026-08-21T09:00:00Z' })

@@ -48,8 +48,9 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (e.location) triple(s, iri(`${PROV}atLocation`), literal(e.location))
     if (e.alternateOf) triple(s, iri(`${PROV}alternateOf`), iri(e.alternateOf))
 
-    const act = graph.activityThatGenerated(e.id)
-    if (act) {
+    // 確定的なツールでは別々の指示が同じ絵に行き着く。生んだ Activity は全部繋ぐ
+    const acts = graph.activitiesThatGenerated(e.id)
+    for (const act of acts) {
       triple(s, iri(`${PROV}wasGeneratedBy`), iri(act.id))
       // 派生は画像の親だけ。人間が参照した外部リソースには張らない（D-006）
       for (const parent of act.used) {
@@ -74,14 +75,40 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (a.negativePrompt) {
       triple(s, iri(`${PROVISION}negativePrompt`), literal(a.negativePrompt))
     }
+    if (a.conditioningImageDigest) {
+      triple(s, iri(`${PROVISION}conditioningImageDigest`), literal(a.conditioningImageDigest))
+    }
+    if (a.conditioningImageLocation) {
+      triple(s, iri(`${PROVISION}conditioningImageLocation`), literal(a.conditioningImageLocation))
+    }
+    if (a.maskImageDigest) {
+      triple(s, iri(`${PROVISION}maskImageDigest`), literal(a.maskImageDigest))
+    }
+    if (a.maskImageLocation) {
+      triple(s, iri(`${PROVISION}maskImageLocation`), literal(a.maskImageLocation))
+    }
+    for (const [key, value] of [
+      ['planningMode', a.planningMode],
+      ['plannerProvider', a.plannerProvider],
+      ['plannerModel', a.plannerModel],
+      ['selectedTool', a.selectedTool],
+      ['toolArguments', a.toolArguments],
+    ] as const) {
+      if (value) triple(s, iri(`${PROVISION}${key}`), literal(value))
+    }
     if (a.provider) triple(s, iri(`${PROVISION}provider`), literal(a.provider))
     for (const [key, value] of [
       ['steps', a.steps],
+      ['imageStrength', a.imageStrength],
       ['width', a.width],
       ['height', a.height],
     ] as const) {
       if (value !== undefined) {
-        triple(s, iri(`${PROVISION}${key}`), literal(value, `${XSD}integer`))
+        triple(
+          s,
+          iri(`${PROVISION}${key}`),
+          literal(value, key === 'imageStrength' ? `${XSD}decimal` : `${XSD}integer`),
+        )
       }
     }
     if (a.guidance !== undefined) {

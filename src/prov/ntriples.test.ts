@@ -119,4 +119,39 @@ describe('N-Triples', () => {
     expect(promptLine).toContain('\\n')
     expect(promptLine).not.toContain('\n')
   })
+
+  it('編集用入力画像の来歴を書き出す', () => {
+    const g = new ProvGraph()
+    g.recordGeneration({
+      image: bytes('edited'),
+      label: '文字を消した案',
+      prompt: 'Edit the selected region',
+      model: 'z-image-turbo-4bit',
+      seed: 42,
+      imageStrength: 0.3,
+      conditioningImageDigest: 'a'.repeat(64),
+      conditioningImageLocation: 'images/aaaaaaaaaaaaaaaa.png',
+      maskImageDigest: 'b'.repeat(64),
+      maskImageLocation: 'images/bbbbbbbbbbbbbbbb.png',
+      planningMode: 'rules',
+      plannerProvider: 'openai-compatible',
+      selectedTool: 'image.erase',
+      toolArguments: '{}',
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:12Z',
+    })
+
+    const lines = toNTriples(g)
+    expect(lines.some((line) => line.includes('#imageStrength') && line.includes('0.3'))).toBe(
+      true,
+    )
+    expect(lines.some((line) => line.includes('#conditioningImageDigest'))).toBe(true)
+    expect(lines.some((line) => line.includes('#conditioningImageLocation'))).toBe(true)
+    expect(lines.some((line) => line.includes('#maskImageDigest'))).toBe(true)
+    expect(lines.some((line) => line.includes('#maskImageLocation'))).toBe(true)
+    expect(lines.some((line) => line.includes('#planningMode'))).toBe(true)
+    expect(lines.some((line) => line.includes('#plannerProvider'))).toBe(true)
+    expect(lines.some((line) => line.includes('#selectedTool'))).toBe(true)
+    expect(lines.some((line) => line.includes('#toolArguments'))).toBe(true)
+  })
 })

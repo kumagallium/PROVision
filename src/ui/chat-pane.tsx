@@ -8,7 +8,7 @@
  * 途中の版を選んでから送れば、そこから枝が生える。分岐は特別な操作ではなく、
  * 「どこに居るか」を変えて送るだけで起きる。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
 import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { imageUrlOf } from './graph-adapter.js'
@@ -17,6 +17,8 @@ import { DetailPanel } from './detail-panel.js'
 import { AssertPanel } from './assert-panel.js'
 import { ProvImage } from './prov-image.js'
 import { apiFetch } from './api-base.js'
+import { EditRegionDialog } from './edit-region-dialog.js'
+import type { EditRegionSelection } from './edit-region-dialog.js'
 
 interface Props {
   graph: ProvGraph | null
@@ -29,31 +31,63 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [routingNotice, setRoutingNotice] = useState<string | null>(null)
+  const [editRegionOpen, setEditRegionOpen] = useState(false)
+  const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
   const chain = graph && current ? graph.lineage(current) : []
   const children = graph && current ? graph.children(current) : []
   /** いま居る版に子がある = ここへ送ると枝が生える */
   const willBranch = children.length > 0
+  const currentEntity = graph && current ? graph.getEntity(current) : undefined
+  const currentImageUrl = currentEntity ? imageUrlOf(currentEntity) : undefined
+
+  useEffect(() => {
+    setEditRegion(null)
+    setEditRegionOpen(false)
+  }, [current])
 
   async function send() {
     const intent = text.trim()
     if (!intent || busy) return
     setBusy(true)
     setError(null)
+    setRoutingNotice(null)
     try {
       const res = await apiFetch('api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent, ...(current ? { parent: current } : {}) }),
+        body: JSON.stringify({
+          intent,
+          ...(current ? { parent: current } : {}),
+          ...(editRegion
+            ? {
+                maskedImage: editRegion.maskedImage,
+                maskImage: editRegion.maskImage,
+              }
+            : {}),
+        }),
       })
       const body = (await res.json()) as
-        | { entity: { id: string }; graph: ProvJsonLdDocument }
+        | {
+            entity: { id: string }
+            graph: ProvJsonLdDocument
+            routing?: { mode: 'rules' | 'llm'; tool: string; warning?: string }
+          }
         | { error: string }
       if (!res.ok || 'error' in body) {
         throw new Error('error' in body ? body.error : `生成に失敗（${res.status}）`)
       }
       onGraph(body.graph)
       onSelect(body.entity.id)
+      if (body.routing) {
+        const source = body.routing.mode === 'llm' ? 'AI' : '規則'
+        setRoutingNotice(
+          body.routing.warning ??
+            `${source}が ${body.routing.tool} を選びました。`,
+        )
+      }
+      setEditRegion(null)
       setText('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
@@ -63,7 +97,8 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   }
 
   return (
-    <section
+    <>
+      <section
       style={{
         borderLeft: '1px solid #e0e5e8',
         display: 'grid',
@@ -124,6 +159,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
               ) : null}
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
                 seed {a.seed} · {a.model}
+                {a.selectedTool ? ` · ${a.selectedTool} (${a.planningMode ?? 'rules'})` : ''}
               </div>
             </div>
           )
@@ -144,6 +180,11 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             生成中… 1 枚 2〜3 分かかります（直列に 1 本ずつ流しています）
           </div>
         ) : null}
+        {routingNotice ? (
+          <div style={{ fontSize: 11, color: '#5c6b73', marginBottom: 4 }}>
+            {routingNotice}
+          </div>
+        ) : null}
         {error ? <div style={{ fontSize: 12, color: '#a8513f' }}>{error}</div> : null}
       </div>
 
@@ -151,6 +192,29 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         {willBranch ? (
           <div style={{ fontSize: 11, color: PALETTE.external.text, marginBottom: 6 }}>
             この版にはすでに続きがあります。ここへ送ると<strong>枝が増えます</strong>
+          </div>
+        ) : null}
+        {currentImageUrl ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <button
+              type="button"
+              onClick={() => setEditRegionOpen(true)}
+              style={{ padding: '5px 8px', fontSize: 11 }}
+            >
+              {editRegion ? '編集範囲を変更' : '編集範囲を指定'}
+            </button>
+            {editRegion ? (
+              <button
+                type="button"
+                onClick={() => setEditRegion(null)}
+                style={{ padding: '5px 8px', fontSize: 11 }}
+              >
+                指定を解除
+              </button>
+            ) : null}
+            <span style={{ fontSize: 11, color: '#7b8892' }}>
+              {editRegion ? '範囲指定済み' : '任意の領域を選べます'}
+            </span>
           </div>
         ) : null}
         <textarea
@@ -191,6 +255,17 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
           {busy ? '生成中…' : willBranch ? 'ここから分岐して生成' : '生成'}
         </button>
       </div>
-    </section>
+      </section>
+      {editRegionOpen && currentImageUrl ? (
+        <EditRegionDialog
+          imageUrl={currentImageUrl}
+          onCancel={() => setEditRegionOpen(false)}
+          onConfirm={(selection) => {
+            setEditRegion(selection)
+            setEditRegionOpen(false)
+          }}
+        />
+      ) : null}
+    </>
   )
 }

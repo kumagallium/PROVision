@@ -38,6 +38,17 @@ export class ImmutabilityError extends Error {
   }
 }
 
+/**
+ * 入力と同じ画像が出たとき。内容ハッシュが同一なら同じ Entity なので（D-001）、
+ * そのまま記録すると自分自身から派生したことになり、グラフが閉じてしまう。
+ */
+export class UnchangedImageError extends Error {
+  constructor(id: Iri) {
+    super(`この操作では画像が変わらなかった: ${id}`)
+    this.name = 'UnchangedImageError'
+  }
+}
+
 /** 1 回の生成を記録するための入力。IRI は呼び出し側が知らなくてよい。 */
 export interface RecordGenerationInput {
   /**
@@ -60,6 +71,16 @@ export interface RecordGenerationInput {
 
   intent?: string
   negativePrompt?: string
+  imageStrength?: number
+  conditioningImageDigest?: string
+  conditioningImageLocation?: string
+  maskImageDigest?: string
+  maskImageLocation?: string
+  planningMode?: 'rules' | 'llm'
+  plannerProvider?: string
+  plannerModel?: string
+  selectedTool?: string
+  toolArguments?: string
   provider?: string
   steps?: number
   guidance?: number
@@ -140,6 +161,43 @@ export class ProvGraph {
   }
 
   /**
+   * 確定的なツールで作り直すときに使う「元絵」を返す。
+   *
+   * ワードマークは帯を継ぎ足すので、作り直しでは帯の乗っていない絵まで戻さないと
+   * 重なる。親自身が作り直しだった場合、その親が使った元絵を引き継ぐ必要がある
+   * （画面上の親には既に帯が乗っている）。連続して縮めても増えないのはこのため（D-014）。
+   */
+  rebuildBaseOf(entity: Iri, tool: string): { digest: string; location?: string } | undefined {
+    const act = this.activityThatGenerated(entity)
+    if (!act || act.selectedTool !== tool) return undefined
+    if (act.conditioningImageDigest) {
+      return {
+        digest: act.conditioningImageDigest,
+        ...(act.conditioningImageLocation ? { location: act.conditioningImageLocation } : {}),
+      }
+    }
+    const parent = act.used[0]
+    if (!parent) return undefined
+    const source = this.entities.get(parent)
+    if (!source) return undefined
+    return {
+      digest: source.digest,
+      ...(source.location ? { location: source.location } : {}),
+    }
+  }
+
+  /**
+   * その画像を生んだ Activity を全部返す。
+   *
+   * 確定的なツールでは、違う言い方の指示が同じ絵に行き着く。内容ハッシュが同じなら
+   * 同じ Entity なので（D-001）、1 つの Entity を複数の Activity が生んだ状態になる。
+   * 1 本しか出さないと、残りが出力の無い Activity として宙に浮く。
+   */
+  activitiesThatGenerated(entity: Iri): GenerationActivity[] {
+    return this.listActivities().filter((a) => a.generated === entity)
+  }
+
+  /**
    * 生成を 1 件記録する。Entity と Activity を作り、派生元があれば辺を張る。
    * 返り値は生成された画像の Entity。
    */
@@ -160,6 +218,9 @@ export class ProvGraph {
 
     const digest = 'digest' in input.image ? input.image.digest : sha256(input.image)
     const entityId = imageIri(this.base, digest)
+    // 派生元と同じ画像なら、新しい版は生まれていない。辺を張ると自己ループになる。
+    // グラフへ触れる前に弾く
+    if ((input.derivedFrom ?? []).includes(entityId)) throw new UnchangedImageError(entityId)
 
     const entity: ImageEntity = {
       id: entityId,
@@ -198,6 +259,20 @@ export class ProvGraph {
       endedAtTime: input.endedAtTime,
       ...(input.intent ? { intent: input.intent } : {}),
       ...(input.negativePrompt ? { negativePrompt: input.negativePrompt } : {}),
+      ...(input.imageStrength !== undefined ? { imageStrength: input.imageStrength } : {}),
+      ...(input.conditioningImageDigest
+        ? { conditioningImageDigest: input.conditioningImageDigest }
+        : {}),
+      ...(input.conditioningImageLocation
+        ? { conditioningImageLocation: input.conditioningImageLocation }
+        : {}),
+      ...(input.maskImageDigest ? { maskImageDigest: input.maskImageDigest } : {}),
+      ...(input.maskImageLocation ? { maskImageLocation: input.maskImageLocation } : {}),
+      ...(input.planningMode ? { planningMode: input.planningMode } : {}),
+      ...(input.plannerProvider ? { plannerProvider: input.plannerProvider } : {}),
+      ...(input.plannerModel ? { plannerModel: input.plannerModel } : {}),
+      ...(input.selectedTool ? { selectedTool: input.selectedTool } : {}),
+      ...(input.toolArguments ? { toolArguments: input.toolArguments } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.steps !== undefined ? { steps: input.steps } : {}),
       ...(input.guidance !== undefined ? { guidance: input.guidance } : {}),
@@ -392,14 +467,28 @@ export class ProvGraph {
    * 会話をまるごと消す。**これは記録の書き換えではなく、記録そのものの破棄。**
    * 消したことは残らない——残す意味があるなら消してはいけない、という立場を取る。
    *
-   * 返り値は、もうどこからも参照されなくなった画像の置き場所。
+   * 返り値は、もうどこからも参照されなくなった画像と編集用入力画像の置き場所。
    * ファイルの削除は呼び側（サーバ）がやる。
    */
-  deleteSession(root: Iri): { removedImages: string[] } {
+  deleteSession(root: Iri): {
+    removedImages: string[]
+    removedConditioningImages: string[]
+    removedMaskImages: string[]
+  } {
     const doomed = new Set(this.session(root).map((e) => e.id))
     if (doomed.size === 0) throw new Error(`その会話がグラフに無い: ${root}`)
 
     const removedImages: string[] = []
+    const conditioningImages = new Set<string>()
+    const maskImages = new Set<string>()
+    for (const activity of this.listActivities()) {
+      if (doomed.has(activity.generated) && activity.conditioningImageLocation) {
+        conditioningImages.add(activity.conditioningImageLocation)
+      }
+      if (doomed.has(activity.generated) && activity.maskImageLocation) {
+        maskImages.add(activity.maskImageLocation)
+      }
+    }
     for (const id of doomed) {
       const location = this.entities.get(id)?.location
       if (location) removedImages.push(location)
@@ -411,7 +500,25 @@ export class ProvGraph {
     for (const [id, a] of [...this.assertions]) {
       if (doomed.has(a.about)) this.assertions.delete(id)
     }
-    return { removedImages }
+    const remainingConditioningImages = new Set(
+      this.listActivities()
+        .map((activity) => activity.conditioningImageLocation)
+        .filter((location): location is string => location !== undefined),
+    )
+    const remainingMaskImages = new Set(
+      this.listActivities()
+        .map((activity) => activity.maskImageLocation)
+        .filter((location): location is string => location !== undefined),
+    )
+    return {
+      removedImages,
+      removedConditioningImages: [...conditioningImages].filter(
+        (location) => !remainingConditioningImages.has(location),
+      ),
+      removedMaskImages: [...maskImages].filter(
+        (location) => !remainingMaskImages.has(location),
+      ),
+    }
   }
 
   /**

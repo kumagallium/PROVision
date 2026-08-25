@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ProvGraph, ReproducibilityError } from './graph.js'
+import { ProvGraph, ReproducibilityError, UnchangedImageError } from './graph.js'
 import type { RecordGenerationInput } from './graph.js'
 
 const bytes = (s: string) => new TextEncoder().encode(s)
@@ -18,6 +18,95 @@ function base(overrides: Partial<RecordGenerationInput> = {}): RecordGenerationI
 }
 
 describe('ProvGraph', () => {
+  it('作り直しを繰り返しても、戻る先は最初の元絵のまま', () => {
+    const g = new ProvGraph()
+    const art = g.recordGeneration(base({ location: 'images/art.png' }))
+    // 1回目: 元絵へ帯を足す
+    const first = g.recordGeneration(
+      base({
+        image: bytes('band-24'),
+        prompt: '「asterism」というロゴタイプを付けて',
+        model: 'jimp-1.6.1',
+        seed: 0,
+        derivedFrom: [art.id],
+        location: 'images/band24.png',
+        selectedTool: 'image.wordmark',
+        toolArguments: JSON.stringify({ text: 'asterism', padding: 24 }),
+        startedAtTime: '2026-08-20T11:00:00Z',
+        endedAtTime: '2026-08-20T11:00:01Z',
+      }),
+    )
+    expect(g.rebuildBaseOf(first.id, 'image.wordmark')?.digest).toBe(art.digest)
+
+    // 2回目: 帯を狭めて作り直す。使ったのは元絵なので、そう記録される
+    const second = g.recordGeneration(
+      base({
+        image: bytes('band-8'),
+        prompt: 'もう少し縮めてください',
+        model: 'jimp-1.6.1',
+        seed: 0,
+        derivedFrom: [first.id],
+        location: 'images/band8.png',
+        selectedTool: 'image.wordmark',
+        toolArguments: JSON.stringify({ text: 'asterism', padding: 8 }),
+        conditioningImageDigest: art.digest,
+        conditioningImageLocation: 'images/art.png',
+        startedAtTime: '2026-08-20T12:00:00Z',
+        endedAtTime: '2026-08-20T12:00:01Z',
+      }),
+    )
+    // 3回目の戻り先も元絵。画面上の親（帯付き）へ戻ると帯が重なる
+    expect(g.rebuildBaseOf(second.id, 'image.wordmark')?.digest).toBe(art.digest)
+    // 別のツールで作られた版には効かせない
+    expect(g.rebuildBaseOf(second.id, 'image.trim')).toBeUndefined()
+  })
+
+  it('違う指示が同じ絵に行き着いたら、両方の Activity を繋ぐ', () => {
+    const g = new ProvGraph()
+    const parent = g.recordGeneration(base())
+    // 確定的なツールでは、言い方が違っても同じ画素になる（D-001で同じEntity）
+    const common = {
+      image: bytes('wordmark-out'),
+      model: 'jimp-1.6.1',
+      seed: 0,
+      derivedFrom: [parent.id],
+    }
+    const first = g.recordGeneration(
+      base({ ...common, prompt: '「asterism」というロゴタイプを付けて' }),
+    )
+    const second = g.recordGeneration(
+      base({
+        ...common,
+        prompt: 'ロゴタイプを付けて',
+        startedAtTime: '2026-08-20T12:00:00Z',
+        endedAtTime: '2026-08-20T12:00:01Z',
+      }),
+    )
+    expect(second.id).toBe(first.id)
+    // 片方だけ繋ぐと、もう片方が出力の無いActivityとして宙に浮く
+    expect(g.activitiesThatGenerated(first.id)).toHaveLength(2)
+  })
+
+  it('派生元と同じ画像は記録せず、自己ループを作らない', () => {
+    const g = new ProvGraph()
+    const parent = g.recordGeneration(base())
+    // 同じ画素をもう一度渡す＝内容ハッシュが同じ＝同じEntity（D-001）
+    expect(() =>
+      g.recordGeneration(
+        base({
+          image: bytes('gen-1'),
+          intent: '余白を整えて',
+          derivedFrom: [parent.id],
+          startedAtTime: '2026-08-20T11:00:00Z',
+          endedAtTime: '2026-08-20T11:00:03Z',
+        }),
+      ),
+    ).toThrow(UnchangedImageError)
+    // 失敗した記録がグラフへ残らない
+    expect(g.listActivities()).toHaveLength(1)
+    expect(g.listEntities()).toHaveLength(1)
+  })
+
   it('画像 1 枚につき Entity と Activity を 1 つずつ作る', () => {
     const g = new ProvGraph()
     const e = g.recordGeneration(base())

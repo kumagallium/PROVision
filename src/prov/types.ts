@@ -42,6 +42,21 @@ export interface GenerationActivity extends ReproducibleSpec {
   /** 利用者が出した自然言語の指示。辺ではなく Activity に置く（D-003） */
   intent?: string
   negativePrompt?: string
+  /** image-to-image で親画像をどれだけ残したか */
+  imageStrength?: number
+  /** 編集範囲を反映した入力画像の内容ハッシュと保存場所 */
+  conditioningImageDigest?: string
+  conditioningImageLocation?: string
+  /** inpaintingで編集する領域を示す二値マスク */
+  maskImageDigest?: string
+  maskImageLocation?: string
+  /** ツール選択の方法と、実際に選択された許可済みツール */
+  planningMode?: 'rules' | 'llm'
+  plannerProvider?: string
+  plannerModel?: string
+  selectedTool?: string
+  /** JSON文字列。JSON-LD/N-Triplesでも同じ形を保持する */
+  toolArguments?: string
   provider?: string
   steps?: number
   guidance?: number
