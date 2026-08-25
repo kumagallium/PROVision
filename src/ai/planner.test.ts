@@ -293,13 +293,13 @@ describe('画像ツールプランナー', () => {
       { hasSourceImage: true, hasEditRegion: false },
     )
     expect(plan.arguments.text).toBe('asterism')
-    // 文字を描けないツールでは拒否する
-    expect(() =>
-      validateImagePlan(
-        { tool: 'image.rotate', arguments: { angle: 90, text: 'x' } },
-        { hasSourceImage: true, hasEditRegion: false },
-      ),
-    ).toThrow('text')
+    // 文字を描けないツールでは黙って落とす（弾くと計画ごと捨てて別の絵になる）
+    const rotate = validateImagePlan(
+      { tool: 'image.rotate', arguments: { angle: 90, text: 'x' } },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(rotate.tool).toBe('image.rotate')
+    expect(rotate.arguments.text).toBeUndefined()
     // 長すぎる文字列と制御文字を拒否する
     expect(() =>
       validateImagePlan(

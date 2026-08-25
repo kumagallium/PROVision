@@ -1,17 +1,16 @@
 import type { AiPlannerConfig } from './config.js'
+import {
+  ARGUMENT_LABELS,
+  imageToolDefinition,
+  isImageToolName,
+  toolCatalogForPrompt,
+  type ImageToolArgumentName,
+  type ImageToolName,
+} from './tools.js'
 import { isTextAdditionIntent, isTextRestyleIntent } from '../image/prompt.js'
 import { resolveAiApiBase } from './provider.js'
 
-export type ImageToolName =
-  | 'image.generate'
-  | 'image.edit'
-  | 'image.erase'
-  | 'image.trim'
-  | 'image.crop-square'
-  | 'image.rotate'
-  | 'image.resize'
-  | 'image.wordmark'
-  | 'background.remove'
+export type { ImageToolName } from './tools.js'
 
 export interface ImageToolArguments {
   angle?: 90 | 180 | 270
@@ -43,18 +42,6 @@ export interface PlanningContext {
   hasEditRegion: boolean
 }
 
-const TOOL_NAMES = new Set<ImageToolName>([
-  'image.generate',
-  'image.edit',
-  'image.erase',
-  'image.trim',
-  'image.crop-square',
-  'image.rotate',
-  'image.resize',
-  'image.wordmark',
-  'background.remove',
-])
-
 function boundedInteger(value: unknown, min: number, max: number): number | undefined {
   if (
     typeof value !== 'number' ||
@@ -73,37 +60,40 @@ export function validateImagePlan(
 ): ImageOperationPlan {
   if (!value || typeof value !== 'object') throw new Error('ツール計画がJSONオブジェクトではありません')
   const raw = value as Record<string, unknown>
-  if (typeof raw.tool !== 'string' || !TOOL_NAMES.has(raw.tool as ImageToolName)) {
+  if (!isImageToolName(raw.tool)) {
     throw new Error(`未対応の画像ツールです: ${String(raw.tool)}`)
   }
-  const tool = raw.tool as ImageToolName
-  if (!context.hasSourceImage && tool !== 'image.generate') {
+  const tool = raw.tool
+  const spec = imageToolDefinition(tool)
+  if (spec.requiresSourceImage === 'forbidden' && context.hasSourceImage) {
+    throw new Error(`編集元画像がある場合は${tool}を選べません`)
+  }
+  if (spec.requiresSourceImage === true && !context.hasSourceImage) {
     throw new Error(`${tool}には編集元の画像が必要です`)
   }
-  if (context.hasSourceImage && tool === 'image.generate') {
-    throw new Error('編集元画像がある場合はimage.generateを選べません')
-  }
-  if (tool === 'image.erase' && !context.hasEditRegion) {
-    throw new Error('image.eraseには利用者が指定した編集範囲が必要です')
+  if (spec.requiresEditRegion && !context.hasEditRegion) {
+    throw new Error(`${tool}には利用者が指定した編集範囲が必要です`)
   }
   const sourceArgs =
     raw.arguments && typeof raw.arguments === 'object'
       ? (raw.arguments as Record<string, unknown>)
       : {}
-  const angle = boundedInteger(sourceArgs.angle, 90, 270)
-  const width = boundedInteger(sourceArgs.width, 1, 8192)
-  const height = boundedInteger(sourceArgs.height, 1, 8192)
-  const padding = boundedInteger(sourceArgs.padding, 0, 1024)
-  const text = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
-  if (tool === 'image.wordmark' && !text) {
-    throw new Error('image.wordmarkには描く文字列（text）が必要です')
+  // 受け取れない引数は黙って落とす。弾くと計画ごと捨てて別のツールへ落ちる
+  const taken = <T>(name: ImageToolArgumentName, value: T): T | undefined =>
+    spec.accepts.includes(name) ? value : undefined
+  const angle = taken('angle', boundedInteger(sourceArgs.angle, 90, 270))
+  const width = taken('width', boundedInteger(sourceArgs.width, 1, 8192))
+  const height = taken('height', boundedInteger(sourceArgs.height, 1, 8192))
+  const padding = taken('padding', boundedInteger(sourceArgs.padding, 0, 1024))
+  const rawText = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
+  const text = taken('text', rawText)
+  if (text && (text.length > 40 || /[\u0000-\u001f\u007f]/.test(text))) {
+    throw new Error('textは制御文字を含まない40文字以内で指定します')
   }
-  if (text) {
-    if (tool !== 'image.generate' && tool !== 'image.edit' && tool !== 'image.wordmark') {
-      throw new Error(`${tool}はtext引数を受け取れません`)
-    }
-    if (text.length > 40 || /[\u0000-\u001f\u007f]/.test(text)) {
-      throw new Error('textは制御文字を含まない40文字以内で指定します')
+  const present: Record<ImageToolArgumentName, unknown> = { angle, width, height, padding, text }
+  for (const name of spec.requiredArguments ?? []) {
+    if (present[name] === undefined) {
+      throw new Error(`${tool}には${ARGUMENT_LABELS[name]}が必要です`)
     }
   }
   if (tool === 'image.rotate' && ![90, 180, 270].includes(angle ?? 0)) {
@@ -114,9 +104,8 @@ export function validateImagePlan(
   }
   // 画像モデルを使わないツールに書き直し文が付いてくることがある。使い道がないだけで
   // 害はないので、弾かずに落とす（弾くと計画ごと捨てて生成側へ落ち、別物が描かれる）
-  const usesPrompt = tool === 'image.generate' || tool === 'image.edit'
   const rewritten =
-    usesPrompt && typeof raw.prompt === 'string'
+    spec.usesPrompt && typeof raw.prompt === 'string'
       ? raw.prompt.replace(/\s+/g, ' ').trim()
       : undefined
   if (rewritten) {
@@ -338,15 +327,9 @@ export async function planImageOperation(input: {
     'You route one image request to exactly one allowed tool.',
     'Return JSON only: {"tool":"...", "arguments":{}, "reason":"short reason", "prompt":"optional rewritten instruction"}.',
     'Allowed tools:',
-    '- image.generate: create a new image when no source exists',
-    '- image.edit: generative change to an existing image; when the user asks to add lettering (wordmark/logotype) and the exact name is clear from the instruction or the lineage, set arguments.text to that exact string (<=40 chars); if no name is available anywhere, omit arguments.text',
-    '- image.erase: erase/heal a user-selected region; requires hasEditRegion=true',
-    '- image.trim: remove or equalize surrounding margins',
-    '- image.crop-square: center-crop to a square',
-    '- image.rotate: rotate; arguments.angle must be 90, 180, or 270',
-    '- image.resize: resize; arguments.width/height are pixels',
-    '- image.wordmark: append a band below the image and draw a wordmark there with a font; requires arguments.text; choose it only to ADD a name that is not in the picture yet. If the image already shows that text, or the user asks to restyle, harmonize, resize, or reposition existing lettering, choose image.edit instead — image.wordmark cannot see or change what is already drawn, so it would duplicate the text.',
-    '- background.remove: make the background transparent',
+    // 一覧は定義から組み立てる。ツールを足したときの書き漏れを構造で防ぐ
+    toolCatalogForPrompt(),
+    'When the user asks to add lettering (wordmark/logotype), set arguments.text to the exact string (<=40 chars). Take it from the instruction, or from the lineage when the instruction does not name it. Omit arguments.text when no name is available anywhere.',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
     'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
     'If arguments.text is set, the rewritten prompt must contain that exact string.',

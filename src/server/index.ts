@@ -11,6 +11,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ProvGraph, UnchangedImageError } from '../prov/graph.js'
+import { imageToolExecutor } from '../ai/tools.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
 import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
@@ -142,20 +143,20 @@ function sourceImageOf(entityId: string): SourceImage {
 }
 
 function isStandardTool(tool: ImageToolName): tool is StandardImageInput['tool'] {
-  return [
-    'image.trim',
-    'image.crop-square',
-    'image.rotate',
-    'image.resize',
-    'image.wordmark',
-  ].includes(tool)
+  return imageToolExecutor(tool) === 'jimp'
 }
 
 function executorAgent(tool: ImageToolName) {
-  if (tool === 'image.erase') return inpaintTool
-  if (tool === 'background.remove') return backgroundTool
-  if (isStandardTool(tool)) return standardTool
-  return imageTool
+  switch (imageToolExecutor(tool)) {
+    case 'inpaint':
+      return inpaintTool
+    case 'background':
+      return backgroundTool
+    case 'jimp':
+      return standardTool
+    default:
+      return imageTool
+  }
 }
 
 function plannerAgent(planning: PlannedImageOperation) {
