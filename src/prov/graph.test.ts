@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ProvGraph, ReproducibilityError } from './graph.js'
+import { ProvGraph, ReproducibilityError, UnchangedImageError } from './graph.js'
 import type { RecordGenerationInput } from './graph.js'
 
 const bytes = (s: string) => new TextEncoder().encode(s)
@@ -18,6 +18,26 @@ function base(overrides: Partial<RecordGenerationInput> = {}): RecordGenerationI
 }
 
 describe('ProvGraph', () => {
+  it('派生元と同じ画像は記録せず、自己ループを作らない', () => {
+    const g = new ProvGraph()
+    const parent = g.recordGeneration(base())
+    // 同じ画素をもう一度渡す＝内容ハッシュが同じ＝同じEntity（D-001）
+    expect(() =>
+      g.recordGeneration(
+        base({
+          image: bytes('gen-1'),
+          intent: '余白を整えて',
+          derivedFrom: [parent.id],
+          startedAtTime: '2026-08-20T11:00:00Z',
+          endedAtTime: '2026-08-20T11:00:03Z',
+        }),
+      ),
+    ).toThrow(UnchangedImageError)
+    // 失敗した記録がグラフへ残らない
+    expect(g.listActivities()).toHaveLength(1)
+    expect(g.listEntities()).toHaveLength(1)
+  })
+
   it('画像 1 枚につき Entity と Activity を 1 つずつ作る', () => {
     const g = new ProvGraph()
     const e = g.recordGeneration(base())

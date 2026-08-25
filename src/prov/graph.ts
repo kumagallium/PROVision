@@ -38,6 +38,17 @@ export class ImmutabilityError extends Error {
   }
 }
 
+/**
+ * 入力と同じ画像が出たとき。内容ハッシュが同一なら同じ Entity なので（D-001）、
+ * そのまま記録すると自分自身から派生したことになり、グラフが閉じてしまう。
+ */
+export class UnchangedImageError extends Error {
+  constructor(id: Iri) {
+    super(`この操作では画像が変わらなかった: ${id}`)
+    this.name = 'UnchangedImageError'
+  }
+}
+
 /** 1 回の生成を記録するための入力。IRI は呼び出し側が知らなくてよい。 */
 export interface RecordGenerationInput {
   /**
@@ -170,6 +181,9 @@ export class ProvGraph {
 
     const digest = 'digest' in input.image ? input.image.digest : sha256(input.image)
     const entityId = imageIri(this.base, digest)
+    // 派生元と同じ画像なら、新しい版は生まれていない。辺を張ると自己ループになる。
+    // グラフへ触れる前に弾く
+    if ((input.derivedFrom ?? []).includes(entityId)) throw new UnchangedImageError(entityId)
 
     const entity: ImageEntity = {
       id: entityId,

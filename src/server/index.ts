@@ -10,7 +10,7 @@ import { Hono } from 'hono'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { ProvGraph } from '../prov/graph.js'
+import { ProvGraph, UnchangedImageError } from '../prov/graph.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
 import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
@@ -828,6 +828,16 @@ app.post('/api/generate', async (c) => {
       },
     })
   } catch (error) {
+    // 画像が変わらなかったのは利用者側の指示の問題で、サーバの故障ではない
+    if (error instanceof UnchangedImageError) {
+      return c.json(
+        {
+          error:
+            'この指示では画像が変わりませんでした。同じ絵は同じ版として扱うため、新しい版は作られていません。指示を具体的にするか、別のツールが選ばれる言い方を試してください',
+        },
+        400,
+      )
+    }
     const why = error instanceof Error ? error.message : String(error)
     return c.json({ error: why }, 500)
   }
