@@ -79,7 +79,7 @@ function idList(node: JsonLdNode, key: string): string[] {
     .filter((v): v is string => v !== undefined)
 }
 
-function entityNode(e: ImageEntity, derivedFrom: string[], generatedBy?: string): JsonLdNode {
+function entityNode(e: ImageEntity, derivedFrom: string[], generatedBy: string[]): JsonLdNode {
   return {
     '@id': e.id,
     '@type': 'Entity',
@@ -89,7 +89,7 @@ function entityNode(e: ImageEntity, derivedFrom: string[], generatedBy?: string)
     ...(e.location ? { atLocation: lit(e.location) } : {}),
     ...(e.alternateOf ? { alternateOf: refs([e.alternateOf]) } : {}),
     ...(derivedFrom.length > 0 ? { wasDerivedFrom: refs(derivedFrom) } : {}),
-    ...(generatedBy ? { wasGeneratedBy: refs([generatedBy]) } : {}),
+    ...(generatedBy.length > 0 ? { wasGeneratedBy: refs(generatedBy) } : {}),
   }
 }
 
@@ -155,8 +155,16 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
   for (const agent of data.agents) nodes.push(agentNode(agent))
 
   for (const e of data.entities) {
-    const act = graph.activityThatGenerated(e.id)
-    nodes.push(entityNode(e, act?.used ?? [], act?.id))
+    // 同じ絵に行き着いた Activity は全部繋ぐ。1 本だけだと残りが宙に浮く
+    const acts = graph.activitiesThatGenerated(e.id)
+    const derivedFrom = [...new Set(acts.flatMap((a) => a.used))]
+    nodes.push(
+      entityNode(
+        e,
+        derivedFrom,
+        acts.map((a) => a.id),
+      ),
+    )
   }
 
   // 人間が参照した外部リソース（asterism の曲線など）にもノードを置く。

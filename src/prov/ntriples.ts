@@ -48,8 +48,9 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (e.location) triple(s, iri(`${PROV}atLocation`), literal(e.location))
     if (e.alternateOf) triple(s, iri(`${PROV}alternateOf`), iri(e.alternateOf))
 
-    const act = graph.activityThatGenerated(e.id)
-    if (act) {
+    // 確定的なツールでは別々の指示が同じ絵に行き着く。生んだ Activity は全部繋ぐ
+    const acts = graph.activitiesThatGenerated(e.id)
+    for (const act of acts) {
       triple(s, iri(`${PROV}wasGeneratedBy`), iri(act.id))
       // 派生は画像の親だけ。人間が参照した外部リソースには張らない（D-006）
       for (const parent of act.used) {

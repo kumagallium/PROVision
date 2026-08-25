@@ -18,6 +18,32 @@ function base(overrides: Partial<RecordGenerationInput> = {}): RecordGenerationI
 }
 
 describe('ProvGraph', () => {
+  it('違う指示が同じ絵に行き着いたら、両方の Activity を繋ぐ', () => {
+    const g = new ProvGraph()
+    const parent = g.recordGeneration(base())
+    // 確定的なツールでは、言い方が違っても同じ画素になる（D-001で同じEntity）
+    const common = {
+      image: bytes('wordmark-out'),
+      model: 'jimp-1.6.1',
+      seed: 0,
+      derivedFrom: [parent.id],
+    }
+    const first = g.recordGeneration(
+      base({ ...common, prompt: '「asterism」というロゴタイプを付けて' }),
+    )
+    const second = g.recordGeneration(
+      base({
+        ...common,
+        prompt: 'ロゴタイプを付けて',
+        startedAtTime: '2026-08-20T12:00:00Z',
+        endedAtTime: '2026-08-20T12:00:01Z',
+      }),
+    )
+    expect(second.id).toBe(first.id)
+    // 片方だけ繋ぐと、もう片方が出力の無いActivityとして宙に浮く
+    expect(g.activitiesThatGenerated(first.id)).toHaveLength(2)
+  })
+
   it('派生元と同じ画像は記録せず、自己ループを作らない', () => {
     const g = new ProvGraph()
     const parent = g.recordGeneration(base())

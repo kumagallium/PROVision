@@ -161,6 +161,17 @@ export class ProvGraph {
   }
 
   /**
+   * その画像を生んだ Activity を全部返す。
+   *
+   * 確定的なツールでは、違う言い方の指示が同じ絵に行き着く。内容ハッシュが同じなら
+   * 同じ Entity なので（D-001）、1 つの Entity を複数の Activity が生んだ状態になる。
+   * 1 本しか出さないと、残りが出力の無い Activity として宙に浮く。
+   */
+  activitiesThatGenerated(entity: Iri): GenerationActivity[] {
+    return this.listActivities().filter((a) => a.generated === entity)
+  }
+
+  /**
    * 生成を 1 件記録する。Entity と Activity を作り、派生元があれば辺を張る。
    * 返り値は生成された画像の Entity。
    */

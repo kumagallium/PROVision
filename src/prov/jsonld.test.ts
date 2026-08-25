@@ -59,6 +59,42 @@ const byType = (nodes: JsonLdNode[], type: string) =>
   nodes.filter((n) => n['@type'] === type)
 
 describe('PROV-JSONLD', () => {
+  it('同じ絵に行き着いた Activity を全部 wasGeneratedBy に出す', () => {
+    const g = new ProvGraph()
+    const parent = g.recordGeneration({
+      image: new TextEncoder().encode('root'),
+      label: '根',
+      prompt: 'root',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-20T10:00:00Z',
+      endedAtTime: '2026-08-20T10:00:01Z',
+    })
+    const common = {
+      image: new TextEncoder().encode('same-output'),
+      label: 'ワードマーク',
+      model: 'jimp-1.6.1',
+      seed: 0,
+      derivedFrom: [parent.id],
+    }
+    g.recordGeneration({
+      ...common,
+      prompt: '「asterism」というロゴタイプを付けて',
+      startedAtTime: '2026-08-20T11:00:00Z',
+      endedAtTime: '2026-08-20T11:00:01Z',
+    })
+    const entity = g.recordGeneration({
+      ...common,
+      prompt: 'ロゴタイプを付けて',
+      startedAtTime: '2026-08-20T12:00:00Z',
+      endedAtTime: '2026-08-20T12:00:01Z',
+    })
+    const doc = toProvJsonLd(g) as { '@graph': Array<Record<string, unknown>> }
+    const node = doc['@graph'].find((n) => n['@id'] === entity.id)!
+    const by = node.wasGeneratedBy as Array<{ '@id': string }>
+    expect(by).toHaveLength(2)
+  })
+
   it('素の PROV を @vocab に置き、provision だけ拡張として足す', () => {
     const doc = toProvJsonLd(sampleGraph())
     const ctx = doc['@context'] as unknown[]
