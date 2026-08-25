@@ -6,6 +6,12 @@
  *   同一性 — 内容ハッシュ。これが Entity の IRI を決めている
  */
 import type { ProvGraph } from '../prov/graph.js'
+import { alternatesOf, compareGenerations, type FieldDifference } from '../prov/compare.js'
+import {
+  REPRODUCIBILITY_LABELS,
+  weakestReproducibility,
+  type ReproducibilityGrade,
+} from '../ai/tools.js'
 
 const CODE: React.CSSProperties = {
   display: 'block',
@@ -85,8 +91,90 @@ export function DetailPanel({
         </>
       ) : null}
 
+      <h3 style={H}>再現の範囲</h3>
+      <code style={CODE}>{reproducibilityLines(graph, entityId).join('\n')}</code>
+
+      {alternatesOf(graph, entityId).map((other) => (
+        <div key={other}>
+          <h3 style={H}>食い違った版との差分</h3>
+          <code style={CODE}>{comparisonLines(graph, other, entityId).join('\n')}</code>
+        </div>
+      ))}
+
       <h3 style={H}>この画像</h3>
       <code style={CODE}>{`sha256: ${entity.digest}`}</code>
     </div>
   )
+}
+
+/**
+ * この版が別の PC でどこまで再現するかを言葉にする（D-015 / D-016）。
+ *
+ * **鎖全体の等級も出す**のが肝。Jimp で切って mflux で描き直した版は、
+ * 「この一手は確定的」だけを見せると再現すると誤解される。
+ * 系譜に 1 本でも確率的な辺があれば、その版は再現しない。
+ */
+export function reproducibilityLines(graph: ProvGraph, entityId: string): string[] {
+  const activity = graph.activityThatGenerated(entityId)
+  const chain = graph.lineage(entityId)
+  const grades = chain
+    .map((a) => a.reproducibility)
+    .filter((g): g is ReproducibilityGrade => g !== undefined)
+
+  const lines: string[] = []
+  if (activity?.reproducibility) {
+    lines.push(`この一手: ${REPRODUCIBILITY_LABELS[activity.reproducibility]}`)
+  }
+  if (grades.length > 0) {
+    lines.push(`ここまでの系譜: ${REPRODUCIBILITY_LABELS[weakestReproducibility(grades)]}`)
+  }
+  if (lines.length === 0) {
+    // 等級を足す前に作った版。無印を「再現する」と読ませない
+    lines.push('等級を記録する前の版なので、再現の範囲は分からない')
+  }
+
+  // 環境が分かる Agent だけ出す。実測できなかったものは行を作らない（D-015）
+  const environments = (activity?.wasAssociatedWith ?? [])
+    .map((id) => graph.listAgents().find((a) => a.id === id))
+    .filter((a) => a && (a.version || a.platform || a.modelFingerprint))
+  for (const agent of environments) {
+    const detail = [
+      agent!.version ? `version ${agent!.version}` : undefined,
+      agent!.modelFingerprint ? `model ${agent!.modelFingerprint}` : undefined,
+      agent!.platform,
+    ].filter(Boolean)
+    lines.push(`${agent!.label}: ${detail.join(' / ')}`)
+  }
+  return lines
+}
+
+/** 片側にしか記録が無い項目は「値が違う」と書かない。調べていないだけかもしれない */
+function differenceLine(d: FieldDifference): string {
+  const side = (v: string | undefined) => (v === undefined ? '（記録なし）' : v)
+  return `${d.label}:\n  もう一方: ${side(d.left)}\n  この版:   ${side(d.right)}`
+}
+
+/**
+ * 食い違った 2 版の差分（D-015）。
+ *
+ * **「原因」とは書かない。** 出せるのは記録した項目のうち違ったものだけで、
+ * それが絵を変えた原因かどうかは言えない。文言でそこを混ぜると、
+ * この画面自身が過大主張になる。
+ */
+export function comparisonLines(graph: ProvGraph, left: string, right: string): string[] {
+  const result = compareGenerations(graph, left, right)
+  if (result.unavailable) return [result.unavailable]
+  if (result.differences.length === 0) {
+    return [
+      `記録した ${result.compared} 項目はすべて一致した。`,
+      '記録していない要因（Metal の実装差、実行時の負荷）が残るので、',
+      '環境が同一だったとは言えない。',
+    ]
+  }
+  return [
+    `記録した ${result.compared} 項目のうち ${result.differences.length} 項目が違う。`,
+    'これは容疑者であって、絵が変わった原因が確かめられたわけではない。',
+    '',
+    ...result.differences.map(differenceLine),
+  ]
 }

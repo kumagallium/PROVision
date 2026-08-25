@@ -1,0 +1,53 @@
+# 「同じ指定で出し直したのに食い違った 2 版は、実行環境の何が違ったのか」
+#
+# D-011 で、食い違った版は prov:alternateOf で繋いである。
+# D-015 で、実行環境は prov:SoftwareAgent に実測値で載せてある。
+# この 2 つを突き合わせると、食い違いの容疑者が SPARQL 1 本で出る。
+#
+# 【この問いに答えられないこと】
+#   ここで出るのは「記録した項目のうち違ったもの」であって、
+#   絵が変わった原因ではない。記録していない変数（Metal のカーネル実装、
+#   実行時のメモリ圧）が残るので、全項目が一致しても
+#   「環境が同一だった」とは言えない。詳細は D-015。
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX provision: <https://kumagallium.github.io/PROVision/schema/context.jsonld#>
+
+SELECT ?版 ?もう一方 ?ツール ?版の環境 ?もう一方の環境 ?何が違うか
+WHERE {
+  # 食い違った 2 版。alternateOf は新しい版から古い版へ 1 方向に張られる
+  ?newer prov:alternateOf ?older .
+  ?newer rdfs:label ?版 .
+  ?older rdfs:label ?もう一方 .
+
+  # それぞれを生んだ Activity と、そこに関わった SoftwareAgent
+  ?newer prov:wasGeneratedBy ?newAct .
+  ?older prov:wasGeneratedBy ?oldAct .
+  ?newAct prov:wasAssociatedWith ?newAgent .
+  ?oldAct prov:wasAssociatedWith ?oldAgent .
+
+  # IRI は環境ごとに変わるので、同じツールかどうかは role で判定する（D-015）
+  ?newAgent a prov:SoftwareAgent ; provision:role ?ツール .
+  ?oldAgent a prov:SoftwareAgent ; provision:role ?ツール .
+
+  # 版・重みの指紋・機種のうち、実際に食い違ったものだけを挙げる
+  {
+    ?newAgent provision:version ?版の環境 .
+    ?oldAgent provision:version ?もう一方の環境 .
+    BIND("ツールの版" AS ?何が違うか)
+  }
+  UNION
+  {
+    ?newAgent provision:modelFingerprint ?版の環境 .
+    ?oldAgent provision:modelFingerprint ?もう一方の環境 .
+    BIND("モデル重みの指紋" AS ?何が違うか)
+  }
+  UNION
+  {
+    ?newAgent provision:platform ?版の環境 .
+    ?oldAgent provision:platform ?もう一方の環境 .
+    BIND("機種・チップ・OS" AS ?何が違うか)
+  }
+  FILTER(?版の環境 != ?もう一方の環境)
+}
+ORDER BY ?版 ?ツール ?何が違うか
