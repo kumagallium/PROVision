@@ -76,6 +76,8 @@ export interface RecordGenerationInput {
   conditioningImageLocation?: string
   maskImageDigest?: string
   maskImageLocation?: string
+  commandTemplate?: string
+  reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic'
   planningMode?: 'rules' | 'llm'
   plannerProvider?: string
   plannerModel?: string
@@ -126,11 +128,31 @@ export class ProvGraph {
     }
   }
 
-  addAgent(slug: string, label: string, kind: ProvAgent['kind'] = 'SoftwareAgent'): ProvAgent {
+  /**
+   * Agent を 1 件置く。既にあれば**そのまま返す**（上書きしない）。
+   *
+   * 実行環境（`details`）を持つ SoftwareAgent は、環境ごとに別の slug を渡すこと。
+   * 同じ slug で版だけ差し替えると、**過去の Activity が今の版で作られたことになる**——
+   * 来歴は書き換えないという原則に反するし、D-015 で足した情報の意味も無くなる。
+   */
+  addAgent(
+    slug: string,
+    label: string,
+    kind: ProvAgent['kind'] = 'SoftwareAgent',
+    details: Pick<ProvAgent, 'role' | 'version' | 'modelFingerprint' | 'platform'> = {},
+  ): ProvAgent {
     const id = agentIri(this.base, slug)
     const existing = this.agents.get(id)
     if (existing) return existing
-    const agent: ProvAgent = { id, label, kind }
+    const agent: ProvAgent = {
+      id,
+      label,
+      kind,
+      ...(details.role ? { role: details.role } : {}),
+      ...(details.version ? { version: details.version } : {}),
+      ...(details.modelFingerprint ? { modelFingerprint: details.modelFingerprint } : {}),
+      ...(details.platform ? { platform: details.platform } : {}),
+    }
     this.agents.set(id, agent)
     return agent
   }
@@ -268,6 +290,8 @@ export class ProvGraph {
         : {}),
       ...(input.maskImageDigest ? { maskImageDigest: input.maskImageDigest } : {}),
       ...(input.maskImageLocation ? { maskImageLocation: input.maskImageLocation } : {}),
+      ...(input.commandTemplate ? { commandTemplate: input.commandTemplate } : {}),
+      ...(input.reproducibility ? { reproducibility: input.reproducibility } : {}),
       ...(input.planningMode ? { planningMode: input.planningMode } : {}),
       ...(input.plannerProvider ? { plannerProvider: input.plannerProvider } : {}),
       ...(input.plannerModel ? { plannerModel: input.plannerModel } : {}),

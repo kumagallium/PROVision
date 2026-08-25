@@ -37,6 +37,10 @@ export function toNTriples(graph: ProvGraph): string[] {
     triple(s, iri(`${RDF}type`), iri(`${PROV}${agent.kind}`))
     triple(s, iri(`${RDF}type`), iri(`${PROV}Agent`))
     triple(s, iri(`${RDFS}label`), literal(agent.label))
+    if (agent.role) triple(s, iri(`${PROVISION}role`), literal(agent.role))
+    if (agent.version) triple(s, iri(`${PROVISION}version`), literal(agent.version))
+    if (agent.modelFingerprint) triple(s, iri(`${PROVISION}modelFingerprint`), literal(agent.modelFingerprint))
+    if (agent.platform) triple(s, iri(`${PROVISION}platform`), literal(agent.platform))
   }
 
   for (const e of graph.listEntities()) {
@@ -88,6 +92,8 @@ export function toNTriples(graph: ProvGraph): string[] {
       triple(s, iri(`${PROVISION}maskImageLocation`), literal(a.maskImageLocation))
     }
     for (const [key, value] of [
+      ['commandTemplate', a.commandTemplate],
+      ['reproducibility', a.reproducibility],
       ['planningMode', a.planningMode],
       ['plannerProvider', a.plannerProvider],
       ['plannerModel', a.plannerModel],

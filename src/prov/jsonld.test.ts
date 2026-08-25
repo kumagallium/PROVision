@@ -194,3 +194,53 @@ describe('PROV-JSONLD', () => {
     ])
   })
 })
+
+describe('実行環境と再現等級（D-015 / D-016）', () => {
+  function envGraph(): ProvGraph {
+    const g = new ProvGraph()
+    const tool = g.addAgent('mflux-abc123', 'mflux 0.9.1', 'SoftwareAgent', {
+      version: '0.9.1',
+      modelFingerprint: 'f00dcafe',
+      platform: 'Mac15,8 / Apple M3 Max / macOS 15.2',
+    })
+    g.recordGeneration({
+      image: bytes('env-1'),
+      label: '環境つきの版',
+      prompt: 'a diagram',
+      model: 'z-image-turbo-4bit',
+      seed: 7,
+      selectedTool: 'image.generate',
+      reproducibility: 'stochastic',
+      startedAtTime: '2026-08-25T10:00:00Z',
+      endedAtTime: '2026-08-25T10:00:12Z',
+      agents: [tool.id],
+    })
+    return g
+  }
+
+  it('実行環境と等級が JSON-LD を往復しても消えない', () => {
+    const back = fromProvJsonLd(toProvJsonLd(envGraph()), DEFAULT_BASE)
+    const agent = back.listAgents().find((a) => a.version)
+    expect(agent?.version).toBe('0.9.1')
+    expect(agent?.modelFingerprint).toBe('f00dcafe')
+    expect(agent?.platform).toBe('Mac15,8 / Apple M3 Max / macOS 15.2')
+    expect(back.listActivities()[0]?.reproducibility).toBe('stochastic')
+  })
+
+  it('実測できなかった項目は書き出さない。空欄と未調査を区別できなくしない', () => {
+    const g = new ProvGraph()
+    g.addAgent('jimp', 'Jimp')
+    const node = toProvJsonLd(g)['@graph'].find((n: JsonLdNode) => n['@type'] === 'SoftwareAgent')
+    expect(node).toBeDefined()
+    expect(node!['provision:version']).toBeUndefined()
+    expect(node!['provision:platform']).toBeUndefined()
+  })
+
+  it('知らない等級は読み戻さない。語彙の外の値をグラフへ通さない', () => {
+    const doc = toProvJsonLd(envGraph())
+    for (const n of doc['@graph']) {
+      if (n['provision:reproducibility']) n['provision:reproducibility'] = 'まあまあ再現する'
+    }
+    expect(fromProvJsonLd(doc, DEFAULT_BASE).listActivities()[0]?.reproducibility).toBeUndefined()
+  })
+})

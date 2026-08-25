@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   ARGUMENT_LABELS,
+  EXECUTOR_REPRODUCIBILITY,
   IMAGE_TOOLS,
   imageToolDefinition,
+  imageToolReproducibility,
+  weakestReproducibility,
   toolCatalogForPrompt,
 } from './tools.js'
 import { ruleBasedPlan, validateImagePlan } from './planner.js'
@@ -87,4 +90,36 @@ describe('例文の振り分け（LLMなしの規則ベース）', () => {
       expect([c.tool, fallback]).toContain(plan.tool)
     })
   }
+})
+
+describe('再現の等級（D-016）', () => {
+  it('全ツールに等級が付く。executor から導くので書き忘れが起きない', () => {
+    for (const tool of IMAGE_TOOLS) {
+      expect(EXECUTOR_REPRODUCIBILITY[tool.executor]).toBeDefined()
+      expect(imageToolReproducibility(tool.name)).toBe(EXECUTOR_REPRODUCIBILITY[tool.executor])
+    }
+  })
+
+  it('Jimp は確定的、拡散モデルは確率的', () => {
+    expect(imageToolReproducibility('image.rotate')).toBe('deterministic')
+    expect(imageToolReproducibility('image.wordmark')).toBe('deterministic')
+    expect(imageToolReproducibility('image.generate')).toBe('stochastic')
+    expect(imageToolReproducibility('image.edit')).toBe('stochastic')
+    expect(imageToolReproducibility('image.erase')).toBe('environment-dependent')
+    expect(imageToolReproducibility('background.remove')).toBe('environment-dependent')
+  })
+
+  it('系譜の等級は一番弱い辺に落ちる。1 本でも再現しなければ鎖は再現しない', () => {
+    expect(weakestReproducibility(['deterministic', 'deterministic'])).toBe('deterministic')
+    expect(weakestReproducibility(['deterministic', 'environment-dependent'])).toBe(
+      'environment-dependent',
+    )
+    expect(weakestReproducibility(['deterministic', 'stochastic', 'environment-dependent'])).toBe(
+      'stochastic',
+    )
+  })
+
+  it('辺が 1 本も無ければ確定的。空の鎖で嘘の警告を出さない', () => {
+    expect(weakestReproducibility([])).toBe('deterministic')
+  })
 })

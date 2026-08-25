@@ -27,6 +27,26 @@ export type ImageToolArgumentName = 'angle' | 'width' | 'height' | 'padding' | '
 /** 誰が実行するか。振り分けはこの値だけを見る */
 export type ImageToolExecutor = 'image-model' | 'jimp' | 'inpaint' | 'background'
 
+/**
+ * 別の PC で同じ指定を出したとき、どこまで同じ絵になるか（D-016）。
+ *
+ * - `deterministic`: 整数・確定的な演算だけ。どの PC でも同じ画素になる
+ * - `environment-dependent`: 乱数は使わないが、モデルとバージョンが一致して初めて同じ
+ * - `stochastic`: 環境が変われば変わりうる。ビット一致は保証しない（D-015）
+ */
+export type ReproducibilityGrade = 'deterministic' | 'environment-dependent' | 'stochastic'
+
+/**
+ * 等級は **executor 単位**で持つ。ツール単位に散らすと、ツールを 1 つ足したときに
+ * 書き忘れて無印の辺が生まれる（D-012 がツール定義を畳んだのと同じ動機）。
+ */
+export const EXECUTOR_REPRODUCIBILITY: Record<ImageToolExecutor, ReproducibilityGrade> = {
+  jimp: 'deterministic',
+  inpaint: 'environment-dependent',
+  background: 'environment-dependent',
+  'image-model': 'stochastic',
+}
+
 export interface ImageToolDefinition {
   name: ImageToolName
   executor: ImageToolExecutor
@@ -165,6 +185,27 @@ export function isImageToolName(value: unknown): value is ImageToolName {
 
 export function imageToolExecutor(name: ImageToolName): ImageToolExecutor {
   return imageToolDefinition(name).executor
+}
+
+/** そのツールで作った版が、別の PC でどこまで再現するか（D-016） */
+export function imageToolReproducibility(name: ImageToolName): ReproducibilityGrade {
+  return EXECUTOR_REPRODUCIBILITY[imageToolExecutor(name)]
+}
+
+/** 系譜全体の等級。**一番弱い辺に落ちる**——1 本でも再現しなければ鎖は再現しない */
+export function weakestReproducibility(
+  grades: readonly ReproducibilityGrade[],
+): ReproducibilityGrade {
+  if (grades.includes('stochastic')) return 'stochastic'
+  if (grades.includes('environment-dependent')) return 'environment-dependent'
+  return 'deterministic'
+}
+
+/** 画面へ出すときの等級名 */
+export const REPRODUCIBILITY_LABELS: Record<ReproducibilityGrade, string> = {
+  deterministic: 'どの PC でも同じ絵になる',
+  'environment-dependent': 'ツールの版が同じなら同じ絵になる',
+  stochastic: '環境が変わると絵も変わりうる',
 }
 
 /** LLM へ渡すツール一覧。説明文を定義から組み立てるので、書き漏れが起きない */

@@ -50,6 +50,21 @@ export interface GenerationActivity extends ReproducibleSpec {
   /** inpaintingで編集する領域を示す二値マスク */
   maskImageDigest?: string
   maskImageLocation?: string
+  /**
+   * 実行したコマンドの雛形。**ホームディレクトリは `~` に畳む。**
+   *
+   * 生の argv を残さないのは 2 つの理由による。プロンプトの一時ファイル名は
+   * 毎回変わるので、そのまま入れると**毎回「違う」と出て差分の意味が消える**。
+   * もう 1 つは利用者名が書き出したファイルに載ること——JSON-LD は外部の
+   * ビューアへ貼る前提なので、そこに個人名を混ぜない。
+   * 実際に使った seed・寸法・steps は別の属性に入っているので、失うものは無い。
+   */
+  commandTemplate?: string
+  /**
+   * この Activity が別の PC でどこまで再現するか（D-016）。
+   * ツール名から引かせず、書き出したファイルに直接載せる。
+   */
+  reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic'
   /** ツール選択の方法と、実際に選択された許可済みツール */
   planningMode?: 'rules' | 'llm'
   plannerProvider?: string
@@ -121,6 +136,30 @@ export interface ProvAgent {
   id: Iri
   label: string
   kind: AgentKind
+  /**
+   * どのツールの実体か（`mflux` / `lama` / `jimp` / `rembg`）。
+   *
+   * IRI は環境ごとに変わる（D-015）ので、**環境をまたいで「同じツール」だと
+   * 言えるのはこの印だけ**。2 つの版を突き合わせるときの対応付けに使う。
+   * ラベルや IRI から推し量る方法は、書式を変えた瞬間に壊れるので採らない。
+   */
+  role?: string
+  /**
+   * 実行環境の実測値（D-015）。**取れなかったものは載せない**——
+   * 別 PC で絵が食い違ったとき、どこが違ったかを特定するための情報なので、
+   * 推定値を書くと目的そのものを潰す。
+   */
+  version?: string
+  /**
+   * モデル重みの指紋。**中身のハッシュではなく、ファイル名とサイズから取る。**
+   * 重み全体を数えると起動のたびに十数秒かかるため。同名のまま中身が
+   * 差し替わったのを検出するのが目的で、そこにはこれで足りる。
+   * 「内容ハッシュ」と名乗らないのは、名前が実態より強い主張をすると
+   * D-010 で踏んだのと同じ失敗になるから。
+   */
+  modelFingerprint?: string
+  /** チップと OS。同じチップ名でも GPU コア数が違うとビットがずれる（D-015） */
+  platform?: string
 }
 
 export interface ProvGraphData {

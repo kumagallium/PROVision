@@ -34,6 +34,14 @@
       "@id": "provision:planningMode",
       "@type": "xsd:string"
     },
+    "reproducibility": {
+      "@id": "provision:reproducibility",
+      "@type": "xsd:string"
+    },
+    "commandTemplate": {
+      "@id": "provision:commandTemplate",
+      "@type": "xsd:string"
+    },
     "plannerProvider": {
       "@id": "provision:plannerProvider",
       "@type": "xsd:string"
@@ -88,6 +96,22 @@
     },
     "mediaType": {
       "@id": "provision:mediaType",
+      "@type": "xsd:string"
+    },
+    "version": {
+      "@id": "provision:version",
+      "@type": "xsd:string"
+    },
+    "modelFingerprint": {
+      "@id": "provision:modelFingerprint",
+      "@type": "xsd:string"
+    },
+    "platform": {
+      "@id": "provision:platform",
+      "@type": "xsd:string"
+    },
+    "role": {
+      "@id": "provision:role",
       "@type": "xsd:string"
     },
     "fabio": "http://purl.org/spar/fabio/",
