@@ -22,6 +22,40 @@ async function sourceImage(): Promise<{ path: string; digest: string }> {
 }
 
 describe('標準画像処理', () => {
+  it('背景にむらがあっても余白を削る', async () => {
+    // 生成画像の背景はグラデーションとノイズを持つ。判定が厳しすぎると端で止まり、
+    // leaveBorder に満たず何も削らない（実測: 上辺が9pxしか進まなかった）
+    const dir = await mkdtemp(join(tmpdir(), 'provision-trim-test-'))
+    dirs.push(dir)
+    const path = join(dir, 'gradient.png')
+    const image = new Jimp({ width: 120, height: 120, color: 0x0a1030ff })
+    // 上ほど明るくなる背景を作る
+    for (let y = 0; y < 120; y++) {
+      const shade = 0x0a + Math.round((119 - y) / 12)
+      for (let x = 0; x < 120; x++) {
+        image.setPixelColor(((shade << 24) >>> 0) + (0x10 << 16) + (0x30 << 8) + 255, x, y)
+      }
+    }
+    // 中央へ前景を置く
+    for (let y = 45; y < 75; y++) {
+      for (let x = 45; x < 75; x++) image.setPixelColor(0xffffffff, x, y)
+    }
+    await writeFile(path, await image.getBuffer('image/png'))
+    const digest = sha256(new Uint8Array(await readFile(path)))
+
+    const result = await processStandardImage({
+      tool: 'image.trim',
+      arguments: { padding: 5 },
+      imagePath: path,
+      imageDigest: digest,
+    })
+    const out = await Jimp.fromBuffer(Buffer.from(result.png))
+    expect(out.bitmap.width).toBeLessThan(120)
+    expect(out.bitmap.height).toBeLessThan(120)
+    // 前景（30px）と余白（左右5pxずつ）は残る
+    expect(out.bitmap.width).toBeGreaterThanOrEqual(40)
+  })
+
   it('ワードマークは帯を継ぎ足して幅を保つ', async () => {
     const source = await sourceImage()
     const result = await processStandardImage({
