@@ -39,6 +39,25 @@ export function isTextRemovalIntent(intent: string): boolean {
 }
 
 /**
+ * その編集が**絵の一部を直すのか、全体を作り替えるのか**（D-023）。
+ *
+ * - `local`: 余白・色・文字など、一部を直す。他は保つ
+ * - `whole`: 抽象化・フラット化・様式の変更など、**全体を作り替える**
+ */
+export type EditScope = 'local' | 'whole'
+
+/**
+ * 全体を作り替える依頼か。**規則で当てにいくのは、LLM が答えなかったときだけ**。
+ * 判断そのものは指示を読んだ側（プランナー）がやるほうが確かである。
+ */
+const WHOLE_IMAGE_TERMS =
+  /(抽象化|抽象的|シンプル|簡素|簡略|フラット|ミニマル|作り直|描き直|書き直|画風|様式|テイスト|大胆|全面的|全体的|simplif|abstract|flat|minimal|redesign|redraw|rework|restyle|bolder)/i
+
+export function isWholeImageIntent(intent: string): boolean {
+  return WHOLE_IMAGE_TERMS.test(intent)
+}
+
+/**
  * 親画像を入力できる場合は、親のテキストプロンプトを再利用しない。
  * 親プロンプトに含まれる文字列が、編集指示と競合して再描画されるため。
  */
@@ -49,6 +68,8 @@ export function promptForImageGeneration(
   hasEditRegion = false,
   /** プランナーが文脈から推定した描画文字列。鉤括弧の明示指定より優先する */
   renderText?: string,
+  /** 一部を直すのか、全体を作り替えるのか（D-023） */
+  scope: EditScope = 'local',
 ): string {
   if (!parentPrompt || !hasSourceImage) {
     const base = parentPrompt ? `${parentPrompt}, ${intent}` : intent
@@ -76,16 +97,31 @@ export function promptForImageGeneration(
       intent,
       ...(quoted ? [`Add the exact text "${quoted}" as a clean legible wordmark.`] : []),
       ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),
-      'Preserve the existing symbol, composition, colors, and geometry.',
+      scope === 'whole'
+        ? 'Redraw the artwork in the requested style; it is expected to look different from the input.'
+        : 'Preserve the existing symbol, composition, colors, and geometry.',
       'Render the lettering cleanly and legibly, matching the existing style.',
     ].join(' ')
   }
 
+  /**
+   * **保存を求める文を、作り替えの依頼へ付けてはいけない**（D-023）。
+   * 「シンプルにして」の直後に「既存の要素・構図・色・形をすべて保て」と書くと
+   * 自己矛盾し、モデルは保存の方に従う（実測: 絵がほとんど変わらなかった）。
+   * 文字追加へ「Do not add any text」を付けたときと同じ失敗である。
+   */
   return [
     'Edit the input image according to this instruction:',
     intent,
     ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),
-    'Preserve all existing visual elements, composition, colors, and geometry unless explicitly changed.',
+    ...(scope === 'whole'
+      ? [
+          'Redraw the whole image in the requested style. It is expected to look clearly different from the input.',
+          'Keep the subject and what it depicts, but the composition, level of detail, and rendering style may change.',
+        ]
+      : [
+          'Preserve all existing visual elements, composition, colors, and geometry unless explicitly changed.',
+        ]),
     'Do not add any text, logo, brand name, or watermark unless explicitly requested.',
   ].join(' ')
 }

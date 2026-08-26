@@ -3,6 +3,7 @@ import {
   MAX_VARIANTS,
   SynthesisForbiddenError,
   asksForMultipleCandidates,
+  editScopeOf,
   planImageOperation,
   proposeVariantPrompts,
   ruleBasedPlan,
@@ -532,5 +533,43 @@ describe('1つの指示から複数の候補（D-018）', () => {
       planner,
     })
     expect(prompts).toHaveLength(MAX_VARIANTS)
+  })
+})
+
+describe('編集の範囲（D-023）', () => {
+  it('LLM が答えた範囲を使う', () => {
+    const plan = validateImagePlan(
+      { tool: 'image.edit', arguments: {}, scope: 'whole' },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.scope).toBe('whole')
+    // 指示の言葉が何であれ、答えた側を優先する
+    expect(editScopeOf(plan, 'もう少し余白を取って')).toBe('whole')
+  })
+
+  it('答えなかったら指示の言葉から当てる', () => {
+    const plan = validateImagePlan(
+      { tool: 'image.edit', arguments: {} },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.scope).toBeUndefined()
+    expect(editScopeOf(plan, '同じ方向性で抽象化をしてほしい')).toBe('whole')
+    expect(editScopeOf(plan, 'もう少し余白を取って')).toBe('local')
+  })
+
+  it('知らない値は載せない。語彙の外を通さない', () => {
+    const plan = validateImagePlan(
+      { tool: 'image.edit', arguments: {}, scope: 'まあまあ変える' },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.scope).toBeUndefined()
+  })
+
+  it('画像モデルを使わないツールには載せない', () => {
+    const plan = validateImagePlan(
+      { tool: 'image.rotate', arguments: { angle: 90 }, scope: 'whole' },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(plan.scope).toBeUndefined()
   })
 })

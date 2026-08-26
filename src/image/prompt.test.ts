@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isRemovalIntent,
   isTextAdditionIntent,
+  isWholeImageIntent,
   isTextRemovalIntent,
   promptForImageGeneration,
 } from './prompt.js'
@@ -76,5 +77,57 @@ describe('画像編集用プロンプト', () => {
   it('指定範囲だけを編集する指示を含める', () => {
     const prompt = promptForImageGeneration(undefined, '背景を消す', true, true)
     expect(prompt).toContain('Edit only the selected region')
+  })
+})
+
+describe('全体を作り替える依頼（D-023）', () => {
+  const PRESERVE = 'Preserve all existing visual elements'
+
+  it('作り替えの依頼へ「すべて保て」を付けない。自己矛盾で絵が変わらなくなる', () => {
+    // 実測でつまずいた 2 件。どちらも保存句のせいで絵がほとんど変わらなかった
+    for (const intent of [
+      'シンプルなフラットデザインのロゴにしてくれますか',
+      '同じ方向性で抽象化をしてほしい',
+    ]) {
+      const prompt = promptForImageGeneration(
+        'a rich isometric icon',
+        intent,
+        true,
+        false,
+        undefined,
+        'whole',
+      )
+      expect(prompt, intent).not.toContain(PRESERVE)
+      expect(prompt, intent).toContain('expected to look clearly different')
+      // 頼まれていない文字は、作り替えでも足させない
+      expect(prompt).toContain('Do not add any text')
+    }
+  })
+
+  it('一部を直す依頼では、これまでどおり保存を求める', () => {
+    const prompt = promptForImageGeneration(
+      'a rich isometric icon',
+      'もう少し余白を取って',
+      true,
+      false,
+      undefined,
+      'local',
+    )
+    expect(prompt).toContain(PRESERVE)
+  })
+
+  it('既定は local。範囲が分からないのに作り替えさせない', () => {
+    expect(
+      promptForImageGeneration('a rich isometric icon', 'もう少し余白を取って', true),
+    ).toContain(PRESERVE)
+  })
+
+  it('指示の言葉から当てる（LLM が答えなかったときの受け皿）', () => {
+    expect(isWholeImageIntent('同じ方向性で抽象化をしてほしい')).toBe(true)
+    expect(isWholeImageIntent('シンプルなフラットデザインのロゴにしてくれますか')).toBe(true)
+    expect(isWholeImageIntent('make it flat and minimal')).toBe(true)
+    // 一部を直す依頼で誤って作り替えさせない
+    expect(isWholeImageIntent('もう少し余白を取って')).toBe(false)
+    expect(isWholeImageIntent('「asterism」の文字を少し小さくして')).toBe(false)
   })
 })
