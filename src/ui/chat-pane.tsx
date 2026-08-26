@@ -19,6 +19,7 @@ import { AssertPanel } from './assert-panel.js'
 import { ProvImage } from './prov-image.js'
 import { apiFetch } from './api-base.js'
 import { EditRegionDialog } from './edit-region-dialog.js'
+import { SourcePicker } from './source-picker.js'
 import type { EditRegionSelection } from './edit-region-dialog.js'
 
 interface Props {
@@ -36,6 +37,9 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const [editRegionOpen, setEditRegionOpen] = useState(false)
   /** 1 回の送信で出す候補の数（D-018）。**指示から数は読み取らない** */
   const [variants, setVariants] = useState(1)
+  /** 材料として足した別の画像（D-021）。いま居る版と合わせて融合する */
+  const [extraParents, setExtraParents] = useState<string[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
   const chain = graph && current ? graph.lineage(current) : []
@@ -48,6 +52,9 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   useEffect(() => {
     setEditRegion(null)
     setEditRegionOpen(false)
+    // 版を移ったら材料も外す。前の版のつもりで足したものが黙って付いてくるのを防ぐ
+    setExtraParents([])
+    setPickerOpen(false)
   }, [current])
 
   async function send() {
@@ -64,6 +71,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
           intent,
           ...(current ? { parent: current } : {}),
           ...(variants > 1 ? { variants } : {}),
+          ...(extraParents.length > 0 ? { extraParents } : {}),
           ...(editRegion
             ? {
                 maskedImage: editRegion.maskedImage,
@@ -92,6 +100,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         )
       }
       setEditRegion(null)
+      setExtraParents([])
       setText('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
@@ -277,6 +286,42 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             <span style={{ fontSize: 11, color: '#7b8892' }}>
               {editRegion ? '範囲指定済み' : '任意の領域を選べます'}
             </span>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              style={{ padding: '5px 8px', fontSize: 11 }}
+            >
+              材料を足す
+            </button>
+            {extraParents.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setExtraParents([])}
+                style={{ padding: '5px 8px', fontSize: 11 }}
+              >
+                材料を外す（{extraParents.length}）
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {extraParents.length > 0 ? (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: PALETTE.image.text }}>材料</span>
+            {extraParents.map((id) => {
+              const picked = graph?.getEntity(id)
+              const url = picked ? imageUrlOf(picked) : undefined
+              return url ? (
+                <ProvImage
+                  key={id}
+                  path={url}
+                  alt={picked?.label}
+                  style={{ display: 'block', width: 40, borderRadius: 6 }}
+                />
+              ) : null
+            })}
+            <span style={{ fontSize: 11, color: '#7b8892' }}>
+              いま居る版と融合します（会話はここから続きます）
+            </span>
           </div>
         ) : null}
         <div
@@ -348,6 +393,20 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         </button>
       </div>
       </section>
+      {pickerOpen && graph ? (
+        <SourcePicker
+          graph={graph}
+          exclude={current}
+          selected={extraParents}
+          max={3}
+          onToggle={(id) =>
+            setExtraParents((prev) =>
+              prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+            )
+          }
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
       {editRegionOpen && currentImageUrl ? (
         <EditRegionDialog
           imageUrl={currentImageUrl}

@@ -99,6 +99,8 @@ export interface RecordGenerationInput {
 
   /** 派生元の画像 Entity の IRI。空なら根 */
   derivedFrom?: Iri[]
+  /** `derivedFrom` のうち、利用者が居た版（D-021）。会話はこれをたどる */
+  branchedFrom?: Iri
   /** 同じ指定で出し直して食い違ったときの相手（prov:alternateOf） */
   alternateOf?: Iri
   /** 人間が参照した外部リソースの IRI（asterism の curve / sample など） */
@@ -237,7 +239,7 @@ export class ProvGraph {
         ...(act.conditioningImageLocation ? { location: act.conditioningImageLocation } : {}),
       }
     }
-    const parent = act.used[0]
+    const parent = act.branchedFrom ?? act.used[0]
     if (!parent) return undefined
     const source = this.entities.get(parent)
     if (!source) return undefined
@@ -338,6 +340,7 @@ export class ProvGraph {
       ...(input.selectedTool ? { selectedTool: input.selectedTool } : {}),
       ...(input.toolArguments ? { toolArguments: input.toolArguments } : {}),
       ...(input.planId ? { planId: input.planId } : {}),
+      ...(input.branchedFrom ? { branchedFrom: input.branchedFrom } : {}),
       ...(input.sourceFileDigest ? { sourceFileDigest: input.sourceFileDigest } : {}),
       ...(input.sourceFileMediaType
         ? { sourceFileMediaType: input.sourceFileMediaType }
@@ -418,7 +421,8 @@ export class ProvGraph {
         }
         return current
       }
-      current = act.used[0]
+      // 融合すると親が複数になる。会話をたどるのは利用者が居た版（D-021）
+      current = act.branchedFrom ?? act.used[0]
     }
     return undefined
   }

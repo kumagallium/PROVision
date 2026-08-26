@@ -36,10 +36,18 @@ export function ImageNode({ data, selected }: NodeProps) {
   const c = PALETTE.image
   return (
     <div
-      style={{ ...card(c.main, c.bg, selected === true), width: 168 }}
-      title={d.label}
+      style={{
+        ...card(c.main, c.bg, selected === true),
+        width: 168,
+        // 別の会話から借りた版（D-021）。この会話には属さないので、実線で描かない
+        ...(d.borrowed ? { borderStyle: 'dashed', opacity: 0.75 } : {}),
+      }}
+      title={d.borrowed ? `${d.label}（別の会話から材料として使った）` : d.label}
     >
       <Handle type="target" position={Position.Top} />
+      {d.borrowed ? (
+        <div style={{ padding: '4px 8px 0', fontSize: 10, color: c.text }}>別の会話から</div>
+      ) : null}
       {d.imageUrl ? (
         <ProvImage
           path={d.imageUrl}

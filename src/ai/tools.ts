@@ -19,6 +19,7 @@ export type ImageToolName =
   | 'image.rotate'
   | 'image.resize'
   | 'image.wordmark'
+  | 'image.compose'
   | 'image.brightness'
   | 'image.contrast'
   | 'background.remove'
@@ -126,6 +127,8 @@ export interface ImageToolDefinition {
   requiresSourceImage: boolean | 'forbidden'
   /** 利用者が指定した編集範囲を必須にするか */
   requiresEditRegion?: boolean
+  /** 材料として足した別の画像を必須にするか（D-021） */
+  requiresExtraSources?: boolean
   /** 欠けたら計画を拒む引数 */
   requiredArguments?: readonly ImageToolArgumentName[]
   /** 受け取れる引数。ここに無いものは黙って落とす */
@@ -225,6 +228,18 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
       { intent: 'ロゴタイプを追加してください' },
       { intent: 'ロゴとロゴタイプの間の余白を広げて' },
     ],
+  },
+  {
+    name: 'image.compose',
+    executor: 'image-model',
+    pixelOrigin: 'synthesized',
+    purpose:
+      'blend the current image with the other images the user attached, into one new image',
+    requiresSourceImage: true,
+    requiresExtraSources: true,
+    accepts: [],
+    usesPrompt: true,
+    examples: [{ intent: 'この2枚を組み合わせて' }],
   },
   {
     name: 'image.brightness',

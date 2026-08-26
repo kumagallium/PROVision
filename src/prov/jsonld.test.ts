@@ -278,6 +278,46 @@ describe('実行環境と再現等級（D-015 / D-016）', () => {
     expect(back.roots()).toHaveLength(1)
   })
 
+  it('分岐元が JSON-LD を往復しても消えない（D-021）', () => {
+    const g = new ProvGraph()
+    const left = g.recordGeneration({
+      image: bytes('merge-left'),
+      label: '左',
+      prompt: 'left',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-08-26T10:00:00Z',
+      endedAtTime: '2026-08-26T10:00:01Z',
+    })
+    const right = g.recordGeneration({
+      image: bytes('merge-right'),
+      label: '右',
+      prompt: 'right',
+      model: 'm',
+      seed: 2,
+      startedAtTime: '2026-08-26T10:00:02Z',
+      endedAtTime: '2026-08-26T10:00:03Z',
+    })
+    g.recordGeneration({
+      image: bytes('merge-fused'),
+      label: '融合',
+      prompt: 'fuse',
+      model: 'm',
+      seed: 3,
+      selectedTool: 'image.compose',
+      derivedFrom: [left.id, right.id],
+      branchedFrom: left.id,
+      startedAtTime: '2026-08-26T10:01:00Z',
+      endedAtTime: '2026-08-26T10:03:00Z',
+    })
+    const back = fromProvJsonLd(toProvJsonLd(g), DEFAULT_BASE)
+    const fused = back.listActivities().find((a) => a.selectedTool === 'image.compose')
+    expect(fused?.used.sort()).toEqual([left.id, right.id].sort())
+    expect(fused?.branchedFrom).toBe(left.id)
+    // 会話が合流しないことまで往復する
+    expect(back.roots()).toHaveLength(2)
+  })
+
   it('取り込みの記録が JSON-LD を往復しても消えない（D-019）', () => {
     const g = new ProvGraph()
     g.recordGeneration({

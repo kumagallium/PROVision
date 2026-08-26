@@ -52,6 +52,7 @@ describe('画像ツールの定義', () => {
       const context = {
         hasSourceImage: spec.requiresSourceImage !== 'forbidden',
         hasEditRegion: true,
+        hasExtraSources: true,
       }
       if (!isSelectableByInstruction(tool.name)) {
         // 指示からは選べないツール。計画として渡ってきたら拒む（D-019）
@@ -69,6 +70,20 @@ describe('画像ツールの定義', () => {
       if (tool.name === 'image.resize') args.width = 600
       const plan = validateImagePlan({ tool: tool.name, arguments: args }, context)
       expect(plan.tool).toBe(tool.name)
+    }
+  })
+
+  it('材料として足した画像の要否が宣言どおりに効く', () => {
+    for (const tool of IMAGE_TOOLS) {
+      if (!imageToolDefinition(tool.name).requiresExtraSources) continue
+      // 足した画像が無いのに通ると、融合のつもりが片方だけの編集になる（D-021）
+      expect(() =>
+        validateImagePlan(
+          { tool: tool.name, arguments: {} },
+          { hasSourceImage: true, hasEditRegion: true, hasExtraSources: false },
+        ),
+        `${tool.name}は材料なしで通ってはいけない`,
+      ).toThrow()
     }
   })
 

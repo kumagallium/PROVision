@@ -141,6 +141,8 @@ export function toNTriples(graph: ProvGraph): string[] {
     for (const agent of a.wasAssociatedWith) {
       triple(s, iri(`${PROV}wasAssociatedWith`), iri(agent))
     }
+    // used のうち利用者が居た版（D-021）。IRI なのでリテラルの表とは別に書く
+    if (a.branchedFrom) triple(s, iri(`${PROVISION}branchedFrom`), iri(a.branchedFrom))
     // どの送信から走ったか（D-022）。prov:hadPlan は Association の述語なので限定表現を通す
     if (a.planId) {
       const association = iri(`${a.id}#association`)

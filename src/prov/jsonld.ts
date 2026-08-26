@@ -133,6 +133,8 @@ function activityNode(a: GenerationActivity): JsonLdNode {
       ? { 'provision:sourceFileMediaType': lit(a.sourceFileMediaType) }
       : {}),
     ...(a.sourceFileName ? { 'provision:sourceFileName': lit(a.sourceFileName) } : {}),
+    // used のうち利用者が居た版（D-021）。RDF の複数値に順序が無いので属性で持つ
+    ...(a.branchedFrom ? { 'provision:branchedFrom': refs([a.branchedFrom]) } : {}),
     ...(a.provider ? { 'provision:provider': lit(a.provider) } : {}),
     ...optionalNumber('provision:steps', a.steps, `${XSD}integer`),
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
@@ -513,6 +515,9 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(str(n, 'provision:sourceFileName') !== undefined
         ? { sourceFileName: str(n, 'provision:sourceFileName')! }
+        : {}),
+      ...(idList(n, 'provision:branchedFrom')[0] !== undefined
+        ? { branchedFrom: idList(n, 'provision:branchedFrom')[0]! }
         : {}),
       ...(str(n, 'provision:provider') !== undefined
         ? { provider: str(n, 'provision:provider')! }

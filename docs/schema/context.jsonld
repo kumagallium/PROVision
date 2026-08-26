@@ -54,6 +54,10 @@
       "@id": "provision:sourceFileName",
       "@type": "xsd:string"
     },
+    "branchedFrom": {
+      "@id": "provision:branchedFrom",
+      "@type": "@id"
+    },
     "commandTemplate": {
       "@id": "provision:commandTemplate",
       "@type": "xsd:string"

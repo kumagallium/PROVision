@@ -102,6 +102,15 @@ export interface GenerationActivity extends ReproducibleSpec {
   /** 派生元の画像。空なら根（初回生成） */
   used: Iri[]
   /**
+   * `used` のうち、**利用者が居た版**（D-021）。融合すると親が複数になるが、
+   * 会話をたどるのはこちらである。
+   *
+   * `used` の順序では表せない——Activity の IRI を決めるためにソートしているうえ、
+   * **RDF の複数値に順序が無い**ので、書き出したファイルを外で読んだ時点で意味を失う。
+   * `prov:PrimarySource` は「一次資料」の意味なので名前を借りない。
+   */
+  branchedFrom?: Iri
+  /**
    * 図版を作るときに人間が参照した外部リソースの IRI
    * （asterism の測定曲線・試料など）。
    *
