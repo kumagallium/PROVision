@@ -21,6 +21,7 @@ import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
 import {
+  DEFAULT_STEPS,
   cacheKeyOf,
   generateImage,
   modelIdOf,
@@ -652,6 +653,10 @@ app.post('/api/rerun', async (c) => {
         generated = await generateImage({
           prompt: original.prompt,
           seed: original.seed,
+          // 記録されたモデルで走らせる。ここを足元の既定に任せると、既定を
+          // 差し替えた瞬間に過去の版が軒並み「食い違った」と記録される——
+          // 原因は元の生成ではなくこちらの差し替えなので、誤った結論が残る（D-002）
+          model: original.model,
           ...(original.width !== undefined ? { width: original.width } : {}),
           ...(original.height !== undefined ? { height: original.height } : {}),
           ...(original.steps !== undefined ? { steps: original.steps } : {}),
@@ -1046,7 +1051,8 @@ app.post('/api/generate', async (c) => {
               model: result.model,
               provider: result.provider,
               seed,
-              ...(usesImageModel ? { steps: 8 } : {}),
+              // 実際に使った値を記録する。mflux 側の既定と必ず同じものを指す（D-002）
+              ...(usesImageModel ? { steps: DEFAULT_STEPS } : {}),
               ...(dimensions ? dimensions : {}),
               ...(plan.tool === 'image.edit' && source
                 ? { imageStrength: IMAGE_EDIT_STRENGTH }
