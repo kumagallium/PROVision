@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.10](https://github.com/kumagallium/PROVision/compare/v0.2.9...v0.2.10) - 2026-08-26
+
+- fix(ui): 候補をできた順に出し、生成中は入力を伏せる by @kumagallium in https://github.com/kumagallium/PROVision/pull/32
+
 ## [v0.2.9](https://github.com/kumagallium/PROVision/compare/v0.2.8...v0.2.9) - 2026-08-26
 
 - fix(config): 更新のたびに AI モデルの登録が消えるのを直す by @kumagallium in https://github.com/kumagallium/PROVision/pull/30
