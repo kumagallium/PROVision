@@ -3,8 +3,11 @@ import {
   ARGUMENT_LABELS,
   EXECUTOR_REPRODUCIBILITY,
   IMAGE_TOOLS,
+  PIXEL_ORIGIN_LABELS,
   imageToolDefinition,
+  imageToolPixelOrigin,
   imageToolReproducibility,
+  lineagePixelOrigin,
   weakestReproducibility,
   toolCatalogForPrompt,
 } from './tools.js'
@@ -121,5 +124,61 @@ describe('再現の等級（D-016）', () => {
 
   it('辺が 1 本も無ければ確定的。空の鎖で嘘の警告を出さない', () => {
     expect(weakestReproducibility([])).toBe('deterministic')
+  })
+})
+
+describe('画素の由来（D-020）', () => {
+  it('全ツールに画素の由来が付き、画面用の言い方もある', () => {
+    for (const tool of IMAGE_TOOLS) {
+      expect(tool.pixelOrigin, `${tool.name}のpixelOrigin`).toBeDefined()
+      expect(PIXEL_ORIGIN_LABELS[tool.pixelOrigin], `${tool.name}のラベル`).toBeTruthy()
+    }
+  })
+
+  it('決定的でも画素を作るものがある。LaMa は等級と由来が食い違う', () => {
+    // ここが両方の軸を持つ理由そのもの。乱数を使わないことは「作っていない」ではない
+    expect(imageToolReproducibility('image.erase')).toBe('environment-dependent')
+    expect(imageToolPixelOrigin('image.erase')).toBe('synthesized')
+  })
+
+  it('同じ executor でも由来は違いうる。だから executor 単位では持てない', () => {
+    // Jimp の 2 つ。等級はどちらも deterministic だが、画素への触り方が違う
+    expect(imageToolReproducibility('image.rotate')).toBe(
+      imageToolReproducibility('image.wordmark'),
+    )
+    expect(imageToolPixelOrigin('image.rotate')).toBe('geometric')
+    expect(imageToolPixelOrigin('image.wordmark')).toBe('annotated')
+  })
+
+  it('生成系は synthesized、背景透明化は removed', () => {
+    expect(imageToolPixelOrigin('image.generate')).toBe('synthesized')
+    expect(imageToolPixelOrigin('image.edit')).toBe('synthesized')
+    expect(imageToolPixelOrigin('background.remove')).toBe('removed')
+    expect(imageToolPixelOrigin('image.trim')).toBe('geometric')
+  })
+
+  it('系譜は一番強い辺へ上がる。1 本でも作っていれば作っている', () => {
+    expect(lineagePixelOrigin(['geometric', 'geometric']).strongest).toBe('geometric')
+    expect(lineagePixelOrigin(['geometric', 'annotated']).strongest).toBe('annotated')
+    expect(lineagePixelOrigin(['geometric', 'synthesized', 'removed']).strongest).toBe(
+      'synthesized',
+    )
+  })
+
+  it('本数で返す。0 が「無かった」か「見ていない」か区別できるように（D-017）', () => {
+    expect(lineagePixelOrigin(['geometric', 'annotated'])).toMatchObject({
+      synthesized: 0,
+      counted: 2,
+    })
+    expect(lineagePixelOrigin([])).toMatchObject({ synthesized: 0, counted: 0 })
+  })
+
+  it('external は強さの序列に入らず、別に併記される', () => {
+    // 取り込んだだけの版で「画素を作った」と言わない。だが手前が見えないことは残す
+    const only = lineagePixelOrigin(['external'])
+    expect(only.strongest).toBe('geometric')
+    expect(only.synthesized).toBe(0)
+    expect(only.hasExternal).toBe(true)
+    expect(lineagePixelOrigin(['geometric']).hasExternal).toBe(false)
   })
 })

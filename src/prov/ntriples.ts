@@ -94,6 +94,7 @@ export function toNTriples(graph: ProvGraph): string[] {
     for (const [key, value] of [
       ['commandTemplate', a.commandTemplate],
       ['reproducibility', a.reproducibility],
+      ['pixelOrigin', a.pixelOrigin],
       ['planningMode', a.planningMode],
       ['plannerProvider', a.plannerProvider],
       ['plannerModel', a.plannerModel],

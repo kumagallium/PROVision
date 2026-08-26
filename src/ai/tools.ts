@@ -47,9 +47,53 @@ export const EXECUTOR_REPRODUCIBILITY: Record<ImageToolExecutor, Reproducibility
   'image-model': 'stochastic',
 }
 
+/**
+ * その一手が画素をどう触ったか（D-020）。**再現の等級とは独立した軸**である。
+ *
+ * LaMa は乱数を使わないので等級は `environment-dependent` だが、消した領域を周囲から
+ * **描いている**。実験画像でそれをやれば、再現できようができまいが改ざんである。
+ * 軸が 1 本しかないと、この 2 つが 1 本に潰れ、`environment-dependent` が
+ * 「安全」と読まれる。
+ *
+ * - `geometric`: 位置と補間だけ。内容の追加も除去もない
+ * - `annotated`: 元の画素を残したまま、確定的な描画を重ねる・余白を足す
+ * - `photometric`: 画素値を変えるが、**画像全体に同じ規則で**。局所的に差をつけない
+ * - `removed`: 画素を消す（透明にする）だけ。足さない
+ * - `synthesized`: **入力に無かった内容を作った**
+ * - `external`: **この画素が何を経てきたかは、この記録の外にある**（取り込み。D-019）
+ */
+export type PixelOrigin =
+  | 'geometric'
+  | 'annotated'
+  | 'photometric'
+  | 'removed'
+  | 'synthesized'
+  | 'external'
+
+/**
+ * 強い順。**`external` は入れない**——「外から来た」は画素への触り方ではなく、
+ * 記録がそこで途切れるという別の事実だから（D-020）。
+ *
+ * 序列は「元の画素にどこまで手を入れたか」で並ぶ:
+ * 何も変えない → 足す → 変える → 消す → 作る。
+ */
+const PIXEL_ORIGIN_STRENGTH: readonly PixelOrigin[] = [
+  'geometric',
+  'annotated',
+  'photometric',
+  'removed',
+  'synthesized',
+]
+
 export interface ImageToolDefinition {
   name: ImageToolName
   executor: ImageToolExecutor
+  /**
+   * 画素をどう触ったか（D-020）。**executor 単位では持てない**——Jimp の回転
+   * （`geometric`）と、これから足す明るさ調整（`photometric`）は同じ実行先で性質が違う。
+   * **省略可にしない。** 型で強制すれば、ツールを 1 つ足した時点でコンパイルが通らない。
+   */
+  pixelOrigin: PixelOrigin
   /** LLM へ渡す説明。「何をするか」と「いつ選ぶか」 */
   purpose: string
   /** 選んではいけない場面。誤分類の歯止めで、LLM への説明にも足す */
@@ -72,6 +116,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.generate',
     executor: 'image-model',
+    pixelOrigin: 'synthesized',
     purpose: 'create a new image when no source exists',
     requiresSourceImage: 'forbidden',
     accepts: ['text'],
@@ -81,6 +126,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.edit',
     executor: 'image-model',
+    pixelOrigin: 'synthesized',
     purpose:
       'generative change to an existing image. Also use it to restyle, harmonize, resize, or reposition lettering that is already drawn',
     requiresSourceImage: true,
@@ -95,6 +141,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.erase',
     executor: 'inpaint',
+    pixelOrigin: 'synthesized',
     purpose: 'erase or heal the region the user selected, filling it from the surroundings',
     requiresSourceImage: true,
     requiresEditRegion: true,
@@ -104,6 +151,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.trim',
     executor: 'jimp',
+    pixelOrigin: 'geometric',
     purpose: 'remove or equalize the margins around the artwork',
     requiresSourceImage: true,
     accepts: ['padding'],
@@ -112,6 +160,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.crop-square',
     executor: 'jimp',
+    pixelOrigin: 'geometric',
     purpose: 'center-crop to a square',
     requiresSourceImage: true,
     accepts: [],
@@ -120,6 +169,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.rotate',
     executor: 'jimp',
+    pixelOrigin: 'geometric',
     purpose: 'rotate the image; arguments.angle must be 90, 180, or 270',
     requiresSourceImage: true,
     requiredArguments: ['angle'],
@@ -129,6 +179,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.resize',
     executor: 'jimp',
+    pixelOrigin: 'geometric',
     purpose: 'resize the image; arguments.width and arguments.height are pixels',
     requiresSourceImage: true,
     accepts: ['width', 'height'],
@@ -137,6 +188,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'image.wordmark',
     executor: 'jimp',
+    pixelOrigin: 'annotated',
     purpose:
       'append a band below the image and draw a wordmark there with a font. Requires arguments.text. Choose it to ADD a name that is not in the picture yet — the lettering comes out exact, which diffusion cannot guarantee. If the name is not stated in the instruction, take it from the lineage. Also choose it to change the gap between the artwork and a wordmark this tool drew earlier: set arguments.padding (pixels above and below the lettering) and the band is rebuilt from the original artwork, so the lettering never gets lost',
     avoidWhen:
@@ -153,6 +205,7 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
   {
     name: 'background.remove',
     executor: 'background',
+    pixelOrigin: 'removed',
     purpose: 'make the background transparent',
     requiresSourceImage: true,
     accepts: [],
@@ -206,6 +259,62 @@ export const REPRODUCIBILITY_LABELS: Record<ReproducibilityGrade, string> = {
   deterministic: 'どの PC でも同じ絵になる',
   'environment-dependent': 'ツールの版が同じなら同じ絵になる',
   stochastic: '環境が変わると絵も変わりうる',
+}
+
+/** そのツールが画素をどう触るか（D-020） */
+export function imageToolPixelOrigin(name: ImageToolName): PixelOrigin {
+  return imageToolDefinition(name).pixelOrigin
+}
+
+export interface LineagePixelOrigin {
+  /** 一番強い辺。`synthesized` が 1 本でもあればそれになる */
+  strongest: PixelOrigin
+  /**
+   * 画素を作った手の本数。**割合や真偽ではなく本数で返す。**
+   * 0 が「1 本も無かった」なのか「そもそも見ていない」なのか区別できなくなるため（D-017）
+   */
+  synthesized: number
+  /** 数えた辺の本数。`counted` が 0 なら、まだ何も見ていない */
+  counted: number
+  /** 取り込み点を含むか。含むなら**その手前は記録の外**（D-019 / D-020） */
+  hasExternal: boolean
+}
+
+/**
+ * 系譜全体の画素の由来。**等級が一番弱い辺へ落ちる（D-016）のと対で、こちらは
+ * 一番強い辺へ上がる。** 1 本でも生成を通っていれば、その版は生成を通っている。
+ *
+ * `external` は強さの序列に入れず、別に併記する（D-020）。取り込んだ画像より前を
+ * PROVision は見ていないので、`synthesized` が 0 本でも「画素を作っていない」とは
+ * 言い切れない。この限界を集約の戻り値から落とすと、画面から消える。
+ */
+export function lineagePixelOrigin(origins: readonly PixelOrigin[]): LineagePixelOrigin {
+  let rank = 0
+  let synthesized = 0
+  for (const origin of origins) {
+    const index = PIXEL_ORIGIN_STRENGTH.indexOf(origin)
+    if (index > rank) rank = index
+    if (origin === 'synthesized') synthesized += 1
+  }
+  return {
+    strongest: PIXEL_ORIGIN_STRENGTH[rank]!,
+    synthesized,
+    counted: origins.length,
+    hasExternal: origins.includes('external'),
+  }
+}
+
+/**
+ * 画面へ出すときの言い方。**「改ざんされていない」とは書かない**（D-020）。
+ * 言えるのは「記録したツールのうち画素を作るものを通ったか」までである。
+ */
+export const PIXEL_ORIGIN_LABELS: Record<PixelOrigin, string> = {
+  geometric: '位置と大きさを変えただけで、画素は作っていない',
+  annotated: '元の画素は残したまま、文字や余白を足した',
+  photometric: '画像全体に同じ規則で明暗を変えた',
+  removed: '画素を消した（足してはいない）',
+  synthesized: '入力に無かった画素を作った',
+  external: '外から取り込んだ。この手前は記録の外',
 }
 
 /** LLM へ渡すツール一覧。説明文を定義から組み立てるので、書き漏れが起きない */

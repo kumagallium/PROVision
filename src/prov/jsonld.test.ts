@@ -211,6 +211,7 @@ describe('実行環境と再現等級（D-015 / D-016）', () => {
       seed: 7,
       selectedTool: 'image.generate',
       reproducibility: 'stochastic',
+      pixelOrigin: 'synthesized',
       startedAtTime: '2026-08-25T10:00:00Z',
       endedAtTime: '2026-08-25T10:00:12Z',
       agents: [tool.id],
@@ -225,6 +226,7 @@ describe('実行環境と再現等級（D-015 / D-016）', () => {
     expect(agent?.modelFingerprint).toBe('f00dcafe')
     expect(agent?.platform).toBe('Mac15,8 / Apple M3 Max / macOS 15.2')
     expect(back.listActivities()[0]?.reproducibility).toBe('stochastic')
+    expect(back.listActivities()[0]?.pixelOrigin).toBe('synthesized')
   })
 
   it('実測できなかった項目は書き出さない。空欄と未調査を区別できなくしない', () => {
@@ -242,5 +244,13 @@ describe('実行環境と再現等級（D-015 / D-016）', () => {
       if (n['provision:reproducibility']) n['provision:reproducibility'] = 'まあまあ再現する'
     }
     expect(fromProvJsonLd(doc, DEFAULT_BASE).listActivities()[0]?.reproducibility).toBeUndefined()
+  })
+
+  it('知らない画素の由来も読み戻さない（D-020）', () => {
+    const doc = toProvJsonLd(envGraph())
+    for (const n of doc['@graph']) {
+      if (n['provision:pixelOrigin']) n['provision:pixelOrigin'] = 'ちょっと描いた'
+    }
+    expect(fromProvJsonLd(doc, DEFAULT_BASE).listActivities()[0]?.pixelOrigin).toBeUndefined()
   })
 })

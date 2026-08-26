@@ -11,7 +11,11 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ProvGraph, UnchangedImageError } from '../prov/graph.js'
-import { imageToolExecutor, imageToolReproducibility } from '../ai/tools.js'
+import {
+  imageToolExecutor,
+  imageToolPixelOrigin,
+  imageToolReproducibility,
+} from '../ai/tools.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
 import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
@@ -643,6 +647,7 @@ app.post('/api/rerun', async (c) => {
         ...(original.plannerModel ? { plannerModel: original.plannerModel } : {}),
         selectedTool: tool,
         reproducibility: imageToolReproducibility(tool),
+        pixelOrigin: imageToolPixelOrigin(tool),
         ...(commandTemplateOf(tool, generationSource !== undefined, RESOLVERS)
           ? { commandTemplate: commandTemplateOf(tool, generationSource !== undefined, RESOLVERS)! }
           : {}),
@@ -895,6 +900,7 @@ app.post('/api/generate', async (c) => {
         ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
         selectedTool: plan.tool,
         reproducibility: imageToolReproducibility(plan.tool),
+        pixelOrigin: imageToolPixelOrigin(plan.tool),
         ...(commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)
           ? { commandTemplate: commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)! }
           : {}),

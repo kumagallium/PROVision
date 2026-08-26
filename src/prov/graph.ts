@@ -78,6 +78,7 @@ export interface RecordGenerationInput {
   maskImageLocation?: string
   commandTemplate?: string
   reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic'
+  pixelOrigin?: 'geometric' | 'annotated' | 'photometric' | 'removed' | 'synthesized' | 'external'
   planningMode?: 'rules' | 'llm'
   plannerProvider?: string
   plannerModel?: string
@@ -292,6 +293,7 @@ export class ProvGraph {
       ...(input.maskImageLocation ? { maskImageLocation: input.maskImageLocation } : {}),
       ...(input.commandTemplate ? { commandTemplate: input.commandTemplate } : {}),
       ...(input.reproducibility ? { reproducibility: input.reproducibility } : {}),
+      ...(input.pixelOrigin ? { pixelOrigin: input.pixelOrigin } : {}),
       ...(input.planningMode ? { planningMode: input.planningMode } : {}),
       ...(input.plannerProvider ? { plannerProvider: input.plannerProvider } : {}),
       ...(input.plannerModel ? { plannerModel: input.plannerModel } : {}),

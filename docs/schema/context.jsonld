@@ -38,6 +38,10 @@
       "@id": "provision:reproducibility",
       "@type": "xsd:string"
     },
+    "pixelOrigin": {
+      "@id": "provision:pixelOrigin",
+      "@type": "xsd:string"
+    },
     "commandTemplate": {
       "@id": "provision:commandTemplate",
       "@type": "xsd:string"
