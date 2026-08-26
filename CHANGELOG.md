@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.8](https://github.com/kumagallium/PROVision/compare/v0.2.7...v0.2.8) - 2026-08-26
+
+- docs: D-020 の表を実装に合わせる by @kumagallium in https://github.com/kumagallium/PROVision/pull/27
+- feat(image): 矢印を引けるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/29
+
 ## [v0.2.7](https://github.com/kumagallium/PROVision/compare/v0.2.6...v0.2.7) - 2026-08-26
 
 - feat(prov): 複数の画像を材料に1枚作れるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/24
