@@ -16,6 +16,19 @@ import { sha256 } from '../prov/sha256.js'
 
 const execFileAsync = promisify(execFile)
 
+/**
+ * 生成の既定値。キャッシュ鍵の計算と実行の両方で使うので、必ずここだけを見る
+ * （2 箇所に散らすと、鍵と実物が食い違って別物をキャッシュから返す）。
+ *
+ * 1024 ではなく 768 なのは実測による。M1 Max で 1 枚あたり
+ * 1024px は 768px の約 2.07 倍かかる（実測 112/54・150/71・200/96 秒）うえ、
+ * 1024px はロゴ指示でも濃い背景色を敷きがちで、素材として扱いにくい絵が出る。
+ * 768px のほうが速くて、かつ白背景の線画で出る。
+ */
+const DEFAULT_WIDTH = 768
+const DEFAULT_HEIGHT = 768
+export const DEFAULT_STEPS = 8
+
 export interface GenerateInput {
   prompt: string
   seed: number
@@ -27,6 +40,8 @@ export interface GenerateInput {
   /** 入力画像の内容ハッシュ。キャッシュ鍵に使う */
   imageDigest?: string
   imageStrength?: number
+  /** 再実行のときだけ渡す。記録されたモデルで走らせる（足元の既定を引き直さない） */
+  model?: string
 }
 
 export interface GenerateResult {
@@ -49,14 +64,54 @@ export function cacheKeyOf(input: GenerateInput, model: string): string {
     [
       input.prompt,
       String(input.seed),
-      String(input.width ?? 1024),
-      String(input.height ?? 1024),
-      String(input.steps ?? 8),
+      String(input.width ?? DEFAULT_WIDTH),
+      String(input.height ?? DEFAULT_HEIGHT),
+      String(input.steps ?? DEFAULT_STEPS),
       input.imageDigest ?? input.imagePath ?? '',
       String(input.imageStrength ?? ''),
       model,
     ].join('\u0000'),
   ).slice(0, 32)
+}
+
+/**
+ * 手元に置かれた z-image-turbo を、質の良い順に探す。
+ *
+ * 量子化ビット数で決めるのは、実測でこうなったため（768px / 8step / 同一 seed）:
+ *
+ *   | 量子化 | ピークメモリ | ディスク | 出力                          |
+ *   | 4bit   | 7.58GB       | 5.5GB    | 灰色のにじみが残る            |
+ *   | 5bit   | 8.35GB       | 6.7GB    | 4bit の改善ではなく別の絵     |
+ *   | 6bit   | 9.12GB       | 7.9GB    | 8bit と見分けがつかない       |
+ *   | 8bit   | 10.65GB      | 10GB     | 6bit と同じ（払い損）         |
+ *
+ * 生成時間は 4 段階とも変わらない。よって 6bit が上限で、8bit を選ぶ理由は無い。
+ * 5bit を 4bit より上に置かないのは、良くなるのではなく別物が出るため。
+ *
+ * ここで 1 つに決め打ちしないのは、必要メモリが機種の搭載量に直接効くから。
+ * 16GB 機は 4bit、余裕のある機械は 6bit、と利用者が置いたもので決まるようにする。
+ */
+const MODEL_DIRS_BEST_FIRST = ['z-image-turbo-6bit', 'z-image-turbo-4bit'] as const
+
+/**
+ * 置き場。`provision` が本来の場所で、`geologo` は前身プロジェクトの置き場。
+ * 後者を探し続けるのは、すでにそこへ置いている人の手元を壊さないため。
+ * どちらに置いても記録される識別子はディレクトリ名ではなくモデル名なので、
+ * 場所を移しても再現の突き合わせには影響しない。
+ */
+const MODEL_CACHE_DIRS = ['provision', 'geologo'] as const
+
+function findSavedModel(
+  namesBestFirst: readonly string[] = MODEL_DIRS_BEST_FIRST,
+): string | null {
+  // 量子化の質を場所より優先する。6bit がどちらかにあれば、それを使う
+  for (const name of namesBestFirst) {
+    for (const dir of MODEL_CACHE_DIRS) {
+      const path = join(homedir(), '.cache', dir, name)
+      if (existsSync(path)) return path
+    }
+  }
+  return null
 }
 
 /**
@@ -68,8 +123,8 @@ export function cacheKeyOf(input: GenerateInput, model: string): string {
  */
 export function suggestImageCommand(): string | null {
   const bin = join(homedir(), '.local', 'bin', 'mflux-generate-z-image-turbo')
-  const saved = join(homedir(), '.cache', 'geologo', 'z-image-turbo-4bit')
-  if (!existsSync(bin) || !existsSync(saved)) return null
+  const saved = findSavedModel()
+  if (!existsSync(bin) || !saved) return null
   return [
     bin,
     `--model ${saved}`,
@@ -92,16 +147,70 @@ export function suggestImageCommand(): string | null {
 export function suggestImageEditCommand(): string | null {
   const bin = join(homedir(), '.local', 'bin', 'mflux-generate-flux2-edit')
   if (!existsSync(bin)) return null
-  return [
-    bin,
-    '--model flux2-klein-4b',
-    '--quantize 8',
+  const tail = [
     '--image-paths {image}',
     '--prompt-file {promptFile}',
     '--seed {seed}',
     '--steps {steps}',
     '--output {out}',
-  ].join(' ')
+  ]
+
+  // 量子化済みを手元に保存してあれば、そちらを読む。
+  //
+  // `--quantize 8` を毎回渡すと、全精度 15GB を読んでから量子化するので、
+  // ピークが量子化後ではなく読み込み時で決まる。実測でここが効いた:
+  // ピーク 13.60GB → 9.96GB（-3.64GB）。所要時間は変わらない。
+  // 出てくる画素は現行と完全一致するので、絵は 1 ドットも変わらない。
+  //
+  // 置き場の名前をそのまま識別子にしている（modelIdOf はディレクトリ名を返す）。
+  // `flux2-klein-4b-q8` は `--model flux2-klein-4b --quantize 8` が返す識別子と
+  // 同じ綴りで、実際に同じ重み・同じ量子化なので、過去の版の再現も壊れない。
+  const saved = findSavedModel(['flux2-klein-4b-q8'])
+  if (saved) {
+    return [bin, `--model ${saved}`, '--base-model flux2-klein-4b', ...tail].join(' ')
+  }
+
+  return [bin, '--model flux2-klein-4b', '--quantize 8', ...tail].join(' ')
+}
+
+/**
+ * 記録されたモデルで走らせるためのコマンドを組む。**再実行専用。**
+ *
+ * 記録どおりの prompt / seed / steps / サイズで走らせておきながら、モデルだけ
+ * 足元の既定を引き直すと、出てきた絵が違うのは当たり前になる。それを
+ * 「再実行で食い違った」と記録すると、元の生成が非決定的だったという誤った
+ * 結論が残る。食い違いの原因は、こちらがモデルを差し替えたことなので（D-002）。
+ *
+ * 探す順:
+ *   1. いまの既定が記録と同じモデルなら、それをそのまま使う
+ *      （編集用の flux2-klein-4b-q8 のように、ローカルの置き場を持たない
+ *        識別子でも、一致していれば再実行できる）
+ *   2. 記録と同じ名前の置き場が手元にあれば、そこを指す
+ *      （既定を 6bit へ上げても、4bit を残している限り昔の版を再現できる）
+ *   3. どちらも無ければ再実行しない。黙って別のモデルで走らせない
+ */
+export function resolveImageCommandForModel(
+  recordedModel: string,
+  options: { edit: boolean; env?: NodeJS.ProcessEnv } = { edit: false },
+): string {
+  const env = options.env ?? process.env
+  const current = options.edit ? resolveImageEditCommand(env) : resolveImageCommand(env)
+  if (modelIdOf(current) === recordedModel) return current
+
+  for (const dir of MODEL_CACHE_DIRS) {
+    const path = join(homedir(), '.cache', dir, recordedModel)
+    if (!existsSync(path)) continue
+    // 置き場が見つかったら、既定コマンドの --model だけを差し替える。
+    // 他の引数（--base-model や置換子）は既定のまま使う
+    return checkTemplate(current.replace(/--model\s+\S+/, `--model ${path}`))
+  }
+
+  throw new Error(
+    `記録されたモデルが手元に無いので再実行できない: ${recordedModel}` +
+      `（いまの既定は ${modelIdOf(current)}）。` +
+      `そのモデルを ~/.cache/provision/${recordedModel} に置くか、` +
+      'PROVISION_IMAGE_COMMAND で指す',
+  )
 }
 
 function checkTemplate(template: string): string {
@@ -117,7 +226,8 @@ export function resolveImageCommand(env: NodeJS.ProcessEnv = process.env): strin
   if (!template) {
     throw new Error(
       '画像生成コマンドが見つからない。PROVISION_IMAGE_COMMAND を設定するか、' +
-        'mflux の量子化済み z-image-turbo を ~/.cache/geologo/z-image-turbo-4bit に置く',
+        'mflux の量子化済み z-image-turbo を ~/.cache/provision/z-image-turbo-6bit に置く' +
+        '（作り方: mflux-save --model z-image-turbo --quantize 6 --path <その場所>）',
     )
   }
   return checkTemplate(template)
@@ -144,10 +254,14 @@ export function modelIdOf(template: string): string {
 }
 
 export async function generateImage(input: GenerateInput): Promise<GenerateResult> {
-  const template = input.imagePath ? resolveImageEditCommand() : resolveImageCommand()
-  const width = input.width ?? 1024
-  const height = input.height ?? 1024
-  const steps = input.steps ?? 8
+  const template = input.model
+    ? resolveImageCommandForModel(input.model, { edit: Boolean(input.imagePath) })
+    : input.imagePath
+      ? resolveImageEditCommand()
+      : resolveImageCommand()
+  const width = input.width ?? DEFAULT_WIDTH
+  const height = input.height ?? DEFAULT_HEIGHT
+  const steps = input.steps ?? DEFAULT_STEPS
   const imageStrength = input.imageStrength ?? 0.3
   const hasImagePlaceholder = template.includes('{image}')
   const canInjectMfluxImage = template.includes('mflux-generate')

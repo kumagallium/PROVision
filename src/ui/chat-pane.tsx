@@ -239,7 +239,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
 
         {busy ? (
           <div style={{ fontSize: 12, color: '#5b8fb9' }}>
-            生成中… 1 枚 2〜3 分かかります（直列に 1 本ずつ流しています）
+            生成中… 1 枚 1〜2 分かかります（直列に 1 本ずつ流しています）
           </div>
         ) : null}
         {routingNotice ? (
