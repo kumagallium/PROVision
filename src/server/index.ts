@@ -46,6 +46,7 @@ import {
   type StandardImageInput,
 } from '../image/standard.js'
 import {
+  SynthesisForbiddenError,
   planImageOperation,
   type ImageToolName,
   type PlannedImageOperation,
@@ -136,6 +137,23 @@ interface Identity {
 }
 
 const IDENTITY_PATH = join(DATA_DIR, 'identity.json')
+const POLICY_PATH = join(DATA_DIR, 'policy.json')
+
+/**
+ * 画素を作る操作を禁じるか（D-020）。**この設定自体は来歴へ書かない。**
+ * 記録するのは実際に実行されたものだけで、「そのとき設定がこうだった」は
+ * 何が実行されたかより弱い主張である。系譜の pixelOrigin を見れば、
+ * 画素を作る手が 1 本も無いことは確定的に言える。
+ */
+async function readPolicy(): Promise<{ forbidSynthesis: boolean }> {
+  if (!existsSync(POLICY_PATH)) return { forbidSynthesis: false }
+  try {
+    const raw = JSON.parse(await readFile(POLICY_PATH, 'utf8')) as { forbidSynthesis?: unknown }
+    return { forbidSynthesis: raw.forbidSynthesis === true }
+  } catch {
+    return { forbidSynthesis: false }
+  }
+}
 
 async function readIdentity(): Promise<Identity> {
   if (!existsSync(IDENTITY_PATH)) return { name: '', email: '' }
@@ -314,6 +332,15 @@ app.get('/api/health', (c) =>
 app.get('/api/graph', (c) => c.json(toProvJsonLd(graph)))
 
 app.get('/api/identity', async (c) => c.json(await readIdentity()))
+
+app.get('/api/policy', async (c) => c.json(await readPolicy()))
+
+app.put('/api/policy', async (c) => {
+  const body = (await c.req.json()) as { forbidSynthesis?: unknown }
+  const policy = { forbidSynthesis: body.forbidSynthesis === true }
+  await writeFile(POLICY_PATH, JSON.stringify(policy, null, 2), 'utf8')
+  return c.json(policy)
+})
 
 app.put('/api/identity', async (c) => {
   const body = (await c.req.json()) as Partial<Identity>
@@ -581,6 +608,12 @@ app.post('/api/rerun', async (c) => {
       }
       const tool = (original.selectedTool ??
         (mask ? 'image.erase' : parentSource ? 'image.edit' : 'image.generate')) as ImageToolName
+      // 再実行も新しい版を生む＝系譜に辺が 1 本増える。禁じているなら、ここも通さない
+      if ((await readPolicy()).forbidSynthesis && imageToolPixelOrigin(tool) === 'synthesized') {
+        throw new SynthesisForbiddenError(
+          'この版は画素を作る操作で作られています。いまの設定では出し直せません',
+        )
+      }
       const plan = validateImagePlan(
         {
           tool,
@@ -684,6 +717,8 @@ app.post('/api/rerun', async (c) => {
 
     return c.json({ ...result, graph: toProvJsonLd(graph) })
   } catch (error) {
+    // 設定と指示の組み合わせの問題であって、サーバの故障ではない
+    if (error instanceof SynthesisForbiddenError) return c.json({ error: error.message }, 400)
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
   }
 })
@@ -778,6 +813,7 @@ app.post('/api/generate', async (c) => {
       context: {
         hasSourceImage: Boolean(source),
         hasEditRegion: Boolean(body.maskImage),
+        forbidSynthesis: (await readPolicy()).forbidSynthesis,
         // 画素からは分からない「この絵の作られ方」を渡す
         ...(parentActivity?.selectedTool
           ? { parentTool: parentActivity.selectedTool as ImageToolName }
@@ -1014,6 +1050,11 @@ app.post('/api/generate', async (c) => {
         },
         400,
       )
+    }
+    // 画素を作る操作を禁じている設定で、それしか選べない指示だった（D-020）。
+    // これも利用者側の話で、サーバの故障ではない
+    if (error instanceof SynthesisForbiddenError) {
+      return c.json({ error: error.message }, 400)
     }
     const why = error instanceof Error ? error.message : String(error)
     return c.json({ error: why }, 500)

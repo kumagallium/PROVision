@@ -19,11 +19,19 @@ export type ImageToolName =
   | 'image.rotate'
   | 'image.resize'
   | 'image.wordmark'
+  | 'image.brightness'
+  | 'image.contrast'
   | 'background.remove'
   | 'image.import'
 
 /** 引数名。ツールごとに受け取れるものを accepts で宣言する */
-export type ImageToolArgumentName = 'angle' | 'width' | 'height' | 'padding' | 'text'
+export type ImageToolArgumentName =
+  | 'angle'
+  | 'width'
+  | 'height'
+  | 'padding'
+  | 'text'
+  | 'amount'
 
 /** 誰が実行するか。振り分けはこの値だけを見る */
 export type ImageToolExecutor = 'image-model' | 'jimp' | 'inpaint' | 'background' | 'import'
@@ -219,6 +227,28 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
     ],
   },
   {
+    name: 'image.brightness',
+    executor: 'jimp',
+    pixelOrigin: 'photometric',
+    purpose:
+      'change the brightness of the WHOLE image by the same rule; arguments.amount is the percent change, where 0 keeps it, 20 brightens by 20%, and -50 halves it',
+    requiresSourceImage: true,
+    requiredArguments: ['amount'],
+    accepts: ['amount'],
+    examples: [{ intent: '20%明るくして' }, { intent: '少し暗くして' }],
+  },
+  {
+    name: 'image.contrast',
+    executor: 'jimp',
+    pixelOrigin: 'photometric',
+    purpose:
+      'change the contrast of the WHOLE image by the same rule; arguments.amount is -100 to 100 and 0 keeps it',
+    requiresSourceImage: true,
+    requiredArguments: ['amount'],
+    accepts: ['amount'],
+    examples: [{ intent: 'コントラストを30上げて' }, { intent: 'コントラストを下げて' }],
+  },
+  {
     name: 'background.remove',
     executor: 'background',
     pixelOrigin: 'removed',
@@ -246,6 +276,7 @@ export const ARGUMENT_LABELS: Record<ImageToolArgumentName, string> = {
   height: '高さ（height）',
   padding: '余白（padding）',
   text: '描く文字列（text）',
+  amount: '変化量（amount、％）',
 }
 
 const BY_NAME = new Map<ImageToolName, ImageToolDefinition>(
@@ -355,11 +386,24 @@ export function isSelectableByInstruction(name: ImageToolName): boolean {
  * LLM へ渡すツール一覧。説明文を定義から組み立てるので、書き漏れが起きない。
  * **指示から選べないツールは載せない**——載せると選ばれてしまう
  */
-export function toolCatalogForPrompt(): string {
-  return IMAGE_TOOLS.filter((tool) => tool.selectableByInstruction !== false).map((tool) => {
+export function toolCatalogForPrompt(options: { forbidSynthesis?: boolean } = {}): string {
+  const lines = IMAGE_TOOLS.filter(
+    (tool) =>
+      tool.selectableByInstruction !== false &&
+      // 禁じているものを見せると選ばれる。選ばせてから拒むより、初めから見せない（D-020）
+      !(options.forbidSynthesis && tool.pixelOrigin === 'synthesized'),
+  ).map((tool) => {
     const parts = [`- ${tool.name}: ${tool.purpose}`]
     if (tool.requiresEditRegion) parts.push('requires a user-selected edit region')
     if (tool.avoidWhen) parts.push(`Do not choose it when ${tool.avoidWhen}`)
     return `${parts.join('. ')}.`
-  }).join('\n')
+  })
+  if (options.forbidSynthesis) {
+    // 一覧から外しても、別のツールの注意書きが禁じたツールを名指しすることがある
+    // （image.wordmark の「Use image.edit instead」）。名指しされても選ばせない
+    lines.push(
+      'Choose only from the tools listed above. Other tool names may appear inside these descriptions; those are not available.',
+    )
+  }
+  return lines.join('\n')
 }

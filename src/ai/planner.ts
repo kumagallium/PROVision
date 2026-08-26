@@ -21,6 +21,8 @@ export interface ImageToolArguments {
   width?: number
   height?: number
   padding?: number
+  /** 画像全体にかける変化量（％）。**0 が無変換**。image.brightness / image.contrast */
+  amount?: number
   /** 描画する文字列。image.generate / image.edit だけが受け取れる */
   text?: string
 }
@@ -41,9 +43,28 @@ export interface PlannedImageOperation {
   warning?: string
 }
 
+/**
+ * 画素を作る操作が禁じられている設定で、それしか選べない指示が来た（D-020）。
+ *
+ * 別の型にしてあるのは**サーバの故障ではないから**。利用者の設定と指示の
+ * 組み合わせの問題なので、500 ではなく理由を添えた 400 で返す。
+ */
+export class SynthesisForbiddenError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SynthesisForbiddenError'
+  }
+}
+
 export interface PlanningContext {
   hasSourceImage: boolean
   hasEditRegion: boolean
+  /**
+   * 画素を作る操作（`pixelOrigin: 'synthesized'`）を禁じるか（D-020）。
+   * **実行してからではなく、計画の段階で拒む**——実行時に止めると、
+   * 選ばれた理由だけが画面に出て絵が出ない、という分かりにくい壊れ方をする
+   */
+  forbidSynthesis?: boolean
   /**
    * 親画像を作ったツール。画素からは「帯と文字を足した絵」だとは分からないが、
    * 来歴には残っている。構造を作り直せるかどうかの判断材料として渡す（D-014）
@@ -93,6 +114,11 @@ export function validateImagePlan(
   if (spec.requiresEditRegion && !context.hasEditRegion) {
     throw new Error(`${tool}には利用者が指定した編集範囲が必要です`)
   }
+  if (context.forbidSynthesis && spec.pixelOrigin === 'synthesized') {
+    throw new SynthesisForbiddenError(
+      `${tool}は入力に無かった画素を作る操作なので、いまの設定では実行できません`,
+    )
+  }
   const sourceArgs =
     raw.arguments && typeof raw.arguments === 'object'
       ? (raw.arguments as Record<string, unknown>)
@@ -104,6 +130,7 @@ export function validateImagePlan(
   const width = taken('width', boundedInteger(sourceArgs.width, 1, 8192))
   const height = taken('height', boundedInteger(sourceArgs.height, 1, 8192))
   const padding = taken('padding', boundedInteger(sourceArgs.padding, 0, 1024))
+  const amount = taken('amount', boundedInteger(sourceArgs.amount, -100, 300))
   const rawText = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
   // 作り直しでは、描く文字列を来歴から補う。画素を見られないLLMは落としがち
   const inherited =
@@ -114,7 +141,14 @@ export function validateImagePlan(
   if (text && (text.length > 40 || /[\u0000-\u001f\u007f]/.test(text))) {
     throw new Error('textは制御文字を含まない40文字以内で指定します')
   }
-  const present: Record<ImageToolArgumentName, unknown> = { angle, width, height, padding, text }
+  const present: Record<ImageToolArgumentName, unknown> = {
+    angle,
+    width,
+    height,
+    padding,
+    text,
+    amount,
+  }
   for (const name of spec.requiredArguments ?? []) {
     if (present[name] === undefined) {
       throw new Error(`${tool}には${ARGUMENT_LABELS[name]}が必要です`)
@@ -125,6 +159,10 @@ export function validateImagePlan(
   }
   if (tool === 'image.resize' && width === undefined && height === undefined) {
     throw new Error('image.resizeにはwidthまたはheightが必要です')
+  }
+  // コントラストは -100〜100。明るさだけ 300% まで上げられる
+  if (tool === 'image.contrast' && (amount === undefined || amount < -100 || amount > 100)) {
+    throw new Error('image.contrastのamountは-100から100の整数です')
   }
   // 画像モデルを使わないツールに書き直し文が付いてくることがある。使い道がないだけで
   // 害はないので、弾かずに落とす（弾くと計画ごと捨てて生成側へ落ち、別物が描かれる）
@@ -149,6 +187,7 @@ export function validateImagePlan(
       ...(height !== undefined ? { height } : {}),
       ...(padding !== undefined ? { padding } : {}),
       ...(text ? { text } : {}),
+      ...(amount !== undefined ? { amount } : {}),
     },
     reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 500) : '',
     ...(rewritten ? { prompt: rewritten } : {}),
@@ -179,6 +218,19 @@ function explicitRule(intent: string, context: PlanningContext): ImageOperationP
   }
   if (/(背景).*(透明|透過)|(透明|透過).*(背景)|remove\s+background/i.test(intent)) {
     return { tool: 'background.remove', arguments: {}, reason: '背景透明化の明示指示' }
+  }
+  // 画像全体にかける明暗の調整（D-020 の photometric）。**局所補正はしない**
+  if (/(コントラスト|contrast)/i.test(intent)) {
+    const digits = /(\d{1,3})/.exec(intent)
+    const down = /(下げ|弱め|低め|落と|decrease|lower|less)/i.test(intent)
+    const amount = digits ? Number(digits[1]) * (down ? -1 : 1) : down ? -20 : 20
+    return { tool: 'image.contrast', arguments: { amount }, reason: 'コントラストの明示指示' }
+  }
+  if (/(明る|暗く|明度|brightness|brighten|darken)/i.test(intent)) {
+    const digits = /(\d{1,3})/.exec(intent)
+    const darker = /(暗く|落と|darken)/i.test(intent)
+    const amount = digits ? Number(digits[1]) * (darker ? -1 : 1) : darker ? -20 : 20
+    return { tool: 'image.brightness', arguments: { amount }, reason: '明るさの明示指示' }
   }
   const rotate =
     /(?:回転|rotate)[^\d]*(90|180|270)/i.exec(intent) ??
@@ -222,16 +274,35 @@ export function isWordmarkGapRequest(intent: string): boolean {
   return isWordmarkGapIntent(intent)
 }
 
+/**
+ * 画素を作る操作を禁じている設定で、そこへ落ちようとしたときに理由を返す（D-020）。
+ *
+ * **落とし先を作らない**のが肝。規則ベースの既定は image.generate / image.edit へ
+ * 落ちるが、どちらも禁じられている。黙って別のツールを動かすのが一番悪い（D-013 の実測）
+ */
+function assertAllowed(plan: ImageOperationPlan, context: PlanningContext): ImageOperationPlan {
+  if (!context.forbidSynthesis) return plan
+  if (imageToolDefinition(plan.tool).pixelOrigin !== 'synthesized') return plan
+  throw new SynthesisForbiddenError(
+    context.hasSourceImage
+      ? 'この指示は画素を作る操作にしか割り当てられませんでした。回転・切り抜き・リサイズ・明るさ・コントラストなど、画素を作らない操作でお試しください'
+      : 'まだ画像がありません。画素を作る操作を使わない設定では、左の「画像を取り込む」から始めてください',
+  )
+}
+
 export function ruleBasedPlan(
   intent: string,
   context: PlanningContext,
 ): ImageOperationPlan {
   return validateImagePlan(
-    explicitRule(intent, context) ?? {
-      tool: context.hasSourceImage ? 'image.edit' : 'image.generate',
-      arguments: {},
-      reason: context.hasSourceImage ? '既存画像への一般編集' : '新規画像生成',
-    },
+    assertAllowed(
+      explicitRule(intent, context) ?? {
+        tool: context.hasSourceImage ? 'image.edit' : 'image.generate',
+        arguments: {},
+        reason: context.hasSourceImage ? '既存画像への一般編集' : '新規画像生成',
+      },
+      context,
+    ),
     context,
   )
 }
@@ -354,7 +425,10 @@ export async function planImageOperation(input: {
 }): Promise<PlannedImageOperation> {
   const deterministic = explicitRule(input.intent, input.context)
   if (deterministic) {
-    return { plan: validateImagePlan(deterministic, input.context), mode: 'rules' }
+    return {
+      plan: validateImagePlan(assertAllowed(deterministic, input.context), input.context),
+      mode: 'rules',
+    }
   }
   const fallback = ruleBasedPlan(input.intent, input.context)
   const planner = input.planner
@@ -365,7 +439,7 @@ export async function planImageOperation(input: {
     'Return JSON only: {"tool":"...", "arguments":{}, "reason":"short reason", "prompt":"optional rewritten instruction"}.',
     'Allowed tools:',
     // 一覧は定義から組み立てる。ツールを足したときの書き漏れを構造で防ぐ
-    toolCatalogForPrompt(),
+    toolCatalogForPrompt({ forbidSynthesis: input.context.forbidSynthesis }),
     'When the user asks to add lettering (wordmark/logotype), set arguments.text to the exact string (<=40 chars). Take it from the instruction, or from the lineage when the instruction does not name it. Omit arguments.text when no name is available anywhere.',
     'Context.parentTool is the tool that produced the current picture, and Context.parentText is the lettering it drew. When parentTool is image.wordmark and the user wants to change the gap, margin, or spacing around that lettering, choose image.wordmark again: set arguments.text to Context.parentText and arguments.padding in pixels (roughly 8 for tight, 24 for default, 60 for airy). The band is rebuilt from the artwork underneath, so nothing is lost. Do not use image.edit for that — the diffusion model repaints everything and drops the lettering.',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
