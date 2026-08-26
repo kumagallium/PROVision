@@ -17,6 +17,7 @@ import {
   imageToolReproducibility,
 } from '../ai/tools.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
+import { migrateConfigFiles } from './config-dir.js'
 import { toNTriplesText } from '../prov/ntriples.js'
 import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
@@ -73,6 +74,11 @@ import {
 } from '../ai/provider.js'
 
 const DATA_DIR = resolve(process.env.PROVISION_DATA_DIR ?? 'data/run')
+/**
+ * 設定の置き場。成果物とは分ける（config-dir.ts に理由）。
+ * 環境変数が無いときは成果物と同じ場所——開発中はここが一番迷わない。
+ */
+const CONFIG_DIR = resolve(process.env.PROVISION_CONFIG_DIR ?? DATA_DIR)
 const IMAGE_DIR = join(DATA_DIR, 'images')
 const CACHE_DIR = join(DATA_DIR, 'cache')
 const GRAPH_PATH = join(DATA_DIR, 'lineage.jsonld')
@@ -86,6 +92,17 @@ const MAX_CONDITIONING_IMAGE_BYTES = 12 * 1024 * 1024
 
 await mkdir(IMAGE_DIR, { recursive: true })
 await mkdir(CACHE_DIR, { recursive: true })
+
+// 置き場を分ける前に登録した設定を持ち越す。複製なので旧版へ戻しても失われない
+{
+  const moved = await migrateConfigFiles(DATA_DIR, CONFIG_DIR)
+  if (moved.copied.length > 0) {
+    console.log(`[config] 旧置き場から引き継ぎました: ${moved.copied.join(', ')}`)
+  }
+  for (const { name, reason } of moved.failed) {
+    console.warn(`[config] ${name} を引き継げませんでした（${reason}）`)
+  }
+}
 
 let graph: ProvGraph = existsSync(GRAPH_PATH)
   ? await loadGraph(GRAPH_PATH)
@@ -146,8 +163,8 @@ interface Identity {
   email: string
 }
 
-const IDENTITY_PATH = join(DATA_DIR, 'identity.json')
-const POLICY_PATH = join(DATA_DIR, 'policy.json')
+const IDENTITY_PATH = join(CONFIG_DIR, 'identity.json')
+const POLICY_PATH = join(CONFIG_DIR, 'policy.json')
 
 /**
  * 画素を作る操作を禁じるか（D-020）。**この設定自体は来歴へ書かない。**
@@ -376,7 +393,7 @@ app.put('/api/identity', async (c) => {
 
 app.get('/api/ai/models', async (c) => {
   try {
-    return c.json(await publicAiModelRegistry(DATA_DIR))
+    return c.json(await publicAiModelRegistry(CONFIG_DIR))
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
   }
@@ -384,7 +401,7 @@ app.get('/api/ai/models', async (c) => {
 
 app.put('/api/ai/planner', async (c) => {
   try {
-    return c.json(await updateAiModelSelection(DATA_DIR, await c.req.json()))
+    return c.json(await updateAiModelSelection(CONFIG_DIR, await c.req.json()))
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
   }
@@ -404,7 +421,7 @@ app.post('/api/ai/models', async (c) => {
       return c.json({ error: '対応していないAIプロバイダーです' }, 400)
     }
     return c.json(
-      await registerAiModel(DATA_DIR, {
+      await registerAiModel(CONFIG_DIR, {
         name: String(body.name ?? ''),
         provider: body.provider,
         modelId: String(body.modelId ?? ''),
@@ -423,7 +440,7 @@ app.post('/api/ai/models', async (c) => {
 
 app.delete('/api/ai/models/:id', async (c) => {
   try {
-    return c.json(await removeAiModel(DATA_DIR, c.req.param('id')))
+    return c.json(await removeAiModel(CONFIG_DIR, c.req.param('id')))
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
   }
@@ -445,7 +462,7 @@ async function aiConnectionFromInput(body: AiConnectionInput) {
   let reusedApiKey = ''
   const reuseModelId = String(body.reuseModelId ?? '').trim()
   if (reuseModelId) {
-    const saved = await modelCredentials(DATA_DIR, reuseModelId)
+    const saved = await modelCredentials(CONFIG_DIR, reuseModelId)
     const sameEndpoint =
       saved.provider === body.provider && resolveAiApiBase(saved) === normalizedApiBase
     if (!sameEndpoint) throw new Error('保存済みモデルと接続先が一致しません')
@@ -915,7 +932,7 @@ app.post('/api/generate', async (c) => {
           : {}),
       },
       lineage: lineageIntents,
-      planner: await plannerCredentials(DATA_DIR),
+      planner: await plannerCredentials(CONFIG_DIR),
     })
     const plan = planning.plan
     const useInpainting = plan.tool === 'image.erase'
@@ -1015,7 +1032,7 @@ app.post('/api/generate', async (c) => {
     const notices: string[] = []
     let variantPrompts = [basePrompt]
     if (wantedVariants > 1) {
-      const planner = await plannerCredentials(DATA_DIR)
+      const planner = await plannerCredentials(CONFIG_DIR)
       if (planner?.enabled && planner.modelId.trim()) {
         try {
           variantPrompts = await proposeVariantPrompts({

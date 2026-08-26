@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { resolveAiApiBase } from './provider.js'
@@ -221,9 +220,25 @@ function withRegistryMutation<T>(dataDir: string, action: () => Promise<T>): Pro
 
 export async function readAiModelRegistry(dataDir: string): Promise<AiModelRegistry> {
   const path = configPath(dataDir)
-  if (!existsSync(path)) return defaultRegistry()
+  let raw: string
   try {
-    return normalizeRegistry(JSON.parse(await readFile(path, 'utf8')))
+    raw = await readFile(path, 'utf8')
+  } catch (error) {
+    // **「無い」と「読めない」を混ぜない。**
+    //
+    // existsSync は権限で拒否されたときも false を返す。それを「まだ登録が無い」
+    // と解釈すると空の登録簿を返してしまい、次の書き込みで実ファイルを空の内容で
+    // 上書きする——登録が消えたように見えるのではなく、本当に消える。
+    // macOS の TCC は署名が変わると許可を落とすので、更新直後に実際に起きた。
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return defaultRegistry()
+    throw new Error(
+      `AIモデル設定を読めません（${code ?? 'unknown'}）: ${path}。` +
+        'アクセスを許可するか、設定の置き場を確認してください',
+    )
+  }
+  try {
+    return normalizeRegistry(JSON.parse(raw))
   } catch (error) {
     throw new Error(
       `AIモデル設定を読めません: ${error instanceof Error ? error.message : String(error)}`,
