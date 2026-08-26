@@ -4,7 +4,7 @@
  * 会話は別の語彙で持たない。**根（親を持たない生成）ごとの連結成分がそのまま 1 つの会話**で、
  * グラフから導ける。別に持つと、グラフと食い違ったときにどちらが本当か分からなくなる。
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
 import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { apiFetch } from './api-base.js'
@@ -35,6 +35,43 @@ export function SessionPane({
 }) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  /**
+   * 外から画像を持ち込む（D-019）。取り込みは新しい会話の根になる——
+   * 親を持たない生成と同じ形にしておかないと、画面に出てこない
+   */
+  async function importFile(file: File) {
+    setImporting(true)
+    setImportError(null)
+    try {
+      const dataUrl = await new Promise<string>((done, fail) => {
+        const reader = new FileReader()
+        reader.onload = () => done(String(reader.result))
+        reader.onerror = () => fail(new Error('ファイルを読めませんでした'))
+        reader.readAsDataURL(file)
+      })
+      const res = await apiFetch('api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl, fileName: file.name }),
+      })
+      const json = (await res.json()) as
+        | { entity: { id: string }; graph: ProvJsonLdDocument }
+        | { error: string }
+      if (!res.ok || 'error' in json) {
+        throw new Error('error' in json ? json.error : `取り込みに失敗（${res.status}）`)
+      }
+      onGraph(json.graph)
+      onOpen(json.entity.id)
+    } catch (e: unknown) {
+      setImportError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setImporting(false)
+    }
+  }
 
   async function rename(root: string) {
     const title = draft.trim()
@@ -138,6 +175,39 @@ export function SessionPane({
         >
           ＋ 新しいチャット
         </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/bmp,image/tiff"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            // 同じファイルを続けて選べるように値を戻す
+            e.target.value = ''
+            if (file) void importFile(file)
+          }}
+        />
+        <button
+          type="button"
+          disabled={importing}
+          onClick={() => fileInput.current?.click()}
+          style={{
+            width: '100%',
+            marginTop: 6,
+            padding: '8px 0',
+            border: '1px solid #d6dde1',
+            borderRadius: 8,
+            background: '#fff',
+            color: '#48565f',
+            fontSize: 13,
+            cursor: importing ? 'progress' : 'pointer',
+          }}
+        >
+          {importing ? '取り込み中…' : '画像を取り込む'}
+        </button>
+        {importError ? (
+          <p style={{ fontSize: 11, color: '#b4232a', margin: '6px 0 0' }}>{importError}</p>
+        ) : null}
       </div>
 
       <div style={{ overflowY: 'auto', padding: '0 8px 12px', position: 'relative' }}>

@@ -184,4 +184,28 @@ describe('実行環境と再現等級を N-Triples へ出す（D-015 / D-016）'
     expect(text).toMatch(/reproducibility>\s+"stochastic"/)
     expect(text).toMatch(/pixelOrigin>\s+"synthesized"/)
   })
+
+  it('取り込んだ元ファイルも SPARQL から引ける（D-019）', () => {
+    const g = new ProvGraph()
+    g.recordGeneration({
+      image: new TextEncoder().encode('nt-import'),
+      label: 'figure2.tif',
+      prompt: '取り込み',
+      model: 'import',
+      seed: 0,
+      selectedTool: 'image.import',
+      reproducibility: 'external',
+      pixelOrigin: 'external',
+      sourceFileDigest: 'b'.repeat(64),
+      sourceFileMediaType: 'image/tiff',
+      sourceFileName: 'figure2.tif',
+      startedAtTime: '2026-08-26T10:00:00Z',
+      endedAtTime: '2026-08-26T10:00:00Z',
+    })
+    const text = toNTriples(g).join('\n')
+    expect(text).toMatch(/sourceFileDigest>\s+"b{64}"/)
+    expect(text).toMatch(/sourceFileMediaType>\s+"image\/tiff"/)
+    expect(text).toMatch(/sourceFileName>\s+"figure2\.tif"/)
+    expect(text).toMatch(/reproducibility>\s+"external"/)
+  })
 })

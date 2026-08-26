@@ -77,13 +77,16 @@ export interface RecordGenerationInput {
   maskImageDigest?: string
   maskImageLocation?: string
   commandTemplate?: string
-  reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic'
+  reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic' | 'external'
   pixelOrigin?: 'geometric' | 'annotated' | 'photometric' | 'removed' | 'synthesized' | 'external'
   planningMode?: 'rules' | 'llm'
   plannerProvider?: string
   plannerModel?: string
   selectedTool?: string
   toolArguments?: string
+  sourceFileDigest?: string
+  sourceFileMediaType?: string
+  sourceFileName?: string
   provider?: string
   steps?: number
   guidance?: number
@@ -299,6 +302,11 @@ export class ProvGraph {
       ...(input.plannerModel ? { plannerModel: input.plannerModel } : {}),
       ...(input.selectedTool ? { selectedTool: input.selectedTool } : {}),
       ...(input.toolArguments ? { toolArguments: input.toolArguments } : {}),
+      ...(input.sourceFileDigest ? { sourceFileDigest: input.sourceFileDigest } : {}),
+      ...(input.sourceFileMediaType
+        ? { sourceFileMediaType: input.sourceFileMediaType }
+        : {}),
+      ...(input.sourceFileName ? { sourceFileName: input.sourceFileName } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.steps !== undefined ? { steps: input.steps } : {}),
       ...(input.guidance !== undefined ? { guidance: input.guidance } : {}),

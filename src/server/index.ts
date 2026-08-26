@@ -32,6 +32,7 @@ import { probePlatform } from '../image/environment.js'
 import { addSoftwareAgent, commandTemplateOf, probeToolEnvironment } from './agents.js'
 import { resolveInpaintCommand } from '../image/lama.js'
 import { imageContentDigest, pngDimensions } from '../image/png.js'
+import { MAX_IMPORT_BYTES, baseFileName, importImage } from '../image/import.js'
 import { promptForImageGeneration } from '../image/prompt.js'
 import { inpaintCacheKeyOf, inpaintImage } from '../image/lama.js'
 import {
@@ -218,6 +219,10 @@ function executorAgent(tool: ImageToolName) {
       return backgroundTool
     case 'jimp':
       return standardTool
+    case 'import':
+      // 取り込みは PNG をそのまま通すことがあり、そのときは何も走っていない。
+      // 走ったかを知っているのは取り込み側だけなので、Agent はあちらで決める
+      throw new Error('取り込みの Agent は /api/import が決めます')
     default:
       return imageTool
   }
@@ -250,6 +255,18 @@ function decodePngDataUrl(value: string): Uint8Array {
     throw new Error('編集用の画像はPNGで、サイズは12MB以下にしてください')
   }
   return new Uint8Array(bytes)
+}
+
+/**
+ * 取り込み用のデコーダ。**形式は名乗りで決めない**——data URL のヘッダも拡張子も
+ * 画面から来た自己申告で、中身と食い違いうる。判定は importImage が中身で行う
+ */
+function decodeImageDataUrl(value: string): Uint8Array {
+  const match = /^data:[^;,]*;base64,([A-Za-z0-9+/]+={0,2})$/.exec(value)
+  if (!match || value.length > MAX_IMPORT_BYTES * 2) {
+    throw new Error('画像データが不正です')
+  }
+  return new Uint8Array(Buffer.from(match[1]!, 'base64'))
 }
 
 async function storePngDataUrl(dataUrl: string): Promise<SourceImage> {
@@ -668,6 +685,61 @@ app.post('/api/rerun', async (c) => {
     return c.json({ ...result, graph: toProvJsonLd(graph) })
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+  }
+})
+
+/**
+ * 外から持ち込んだ画像を取り込む（D-019）。
+ *
+ * Activity を伴わせるのが肝。Entity だけ置くと、会話の根が「親を持たない生成が
+ * 生んだ画像」で定義されている以上（`ProvGraph.roots`）画面に出てこないうえ、
+ * **いつ・誰が持ち込んだかという実在する事実の置き場所が無くなる。**
+ */
+app.post('/api/import', async (c) => {
+  const body = (await c.req.json()) as { dataUrl?: string; fileName?: string }
+  try {
+    const imported = await importImage(decodeImageDataUrl(String(body.dataUrl ?? '')))
+    const fileName = baseFileName(String(body.fileName ?? '')) || '取り込んだ画像'
+
+    const entity = await serial(async () => {
+      const digest = imageContentDigest(imported.png)
+      const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
+      await writeFile(path, imported.png)
+      const dimensions = pngDimensions(imported.png)
+      const now = new Date().toISOString()
+      const recorded = graph.recordGeneration({
+        image: { digest },
+        label: fileName,
+        location: `images/${digest.slice(0, 16)}.png`,
+        // モデルへ渡した文字列は無い。再現に要るのは元のファイルで、
+        // それは sourceFileDigest が持つ（D-019）
+        prompt: '取り込み',
+        model: 'import',
+        seed: 0,
+        ...(dimensions ?? {}),
+        intent: `取り込み: ${fileName}`,
+        selectedTool: 'image.import',
+        reproducibility: imageToolReproducibility('image.import'),
+        pixelOrigin: imageToolPixelOrigin('image.import'),
+        sourceFileDigest: imported.sourceFileDigest,
+        sourceFileMediaType: imported.sourceFileMediaType,
+        sourceFileName: fileName,
+        startedAtTime: now,
+        endedAtTime: now,
+        agents: [
+          // PNG はそのまま通すので、そのときは Jimp が走っていない。
+          // 走ったものだけ載せる（D-015）
+          ...(imported.converted ? [standardTool.id] : []),
+          (await personAgent()).id,
+        ],
+      })
+      await persist()
+      return recorded
+    })
+
+    return c.json({ entity, graph: toProvJsonLd(graph) })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
   }
 })
 

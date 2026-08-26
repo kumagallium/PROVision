@@ -100,6 +100,9 @@ export function toNTriples(graph: ProvGraph): string[] {
       ['plannerModel', a.plannerModel],
       ['selectedTool', a.selectedTool],
       ['toolArguments', a.toolArguments],
+      ['sourceFileDigest', a.sourceFileDigest],
+      ['sourceFileMediaType', a.sourceFileMediaType],
+      ['sourceFileName', a.sourceFileName],
     ] as const) {
       if (value) triple(s, iri(`${PROVISION}${key}`), literal(value))
     }

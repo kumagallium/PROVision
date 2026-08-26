@@ -246,6 +246,32 @@ describe('実行環境と再現等級（D-015 / D-016）', () => {
     expect(fromProvJsonLd(doc, DEFAULT_BASE).listActivities()[0]?.reproducibility).toBeUndefined()
   })
 
+  it('取り込みの記録が JSON-LD を往復しても消えない（D-019）', () => {
+    const g = new ProvGraph()
+    g.recordGeneration({
+      image: bytes('imported'),
+      label: 'figure2.tif',
+      prompt: '取り込み',
+      model: 'import',
+      seed: 0,
+      selectedTool: 'image.import',
+      reproducibility: 'external',
+      pixelOrigin: 'external',
+      sourceFileDigest: 'a'.repeat(64),
+      sourceFileMediaType: 'image/tiff',
+      sourceFileName: 'figure2.tif',
+      startedAtTime: '2026-08-26T10:00:00Z',
+      endedAtTime: '2026-08-26T10:00:00Z',
+    })
+    const back = fromProvJsonLd(toProvJsonLd(g), DEFAULT_BASE).listActivities()[0]
+    expect(back?.reproducibility).toBe('external')
+    expect(back?.pixelOrigin).toBe('external')
+    // 元ファイルのバイト列のハッシュ。Entity の同一性（画素）とは別に残す
+    expect(back?.sourceFileDigest).toBe('a'.repeat(64))
+    expect(back?.sourceFileMediaType).toBe('image/tiff')
+    expect(back?.sourceFileName).toBe('figure2.tif')
+  })
+
   it('知らない画素の由来も読み戻さない（D-020）', () => {
     const doc = toProvJsonLd(envGraph())
     for (const n of doc['@graph']) {

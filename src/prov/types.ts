@@ -64,7 +64,7 @@ export interface GenerationActivity extends ReproducibleSpec {
    * この Activity が別の PC でどこまで再現するか（D-016）。
    * ツール名から引かせず、書き出したファイルに直接載せる。
    */
-  reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic'
+  reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic' | 'external'
   /**
    * この Activity が画素をどう触ったか（D-020）。**再現の等級とは独立した軸**である。
    * 等級が同じでも画素を作ったかどうかは違う——LaMa は乱数を使わない
@@ -83,6 +83,15 @@ export interface GenerationActivity extends ReproducibleSpec {
   plannerProvider?: string
   plannerModel?: string
   selectedTool?: string
+  /**
+   * 取り込んだ元ファイルの記録（D-019）。**Entity の同一性は画素で決まる**（D-010）ので、
+   * 元のバイト列のハッシュはこちら側——取り込みという行為の記録——に置く。
+   * Entity へ足すと、同じ絵を別形式で 2 回取り込んだときに同一性が割れる。
+   */
+  sourceFileDigest?: string
+  sourceFileMediaType?: string
+  /** ファイル名だけ。**パスは載せない**（利用者名を書き出さない。D-017 と同じ理由） */
+  sourceFileName?: string
   /** JSON文字列。JSON-LD/N-Triplesでも同じ形を保持する */
   toolArguments?: string
   provider?: string

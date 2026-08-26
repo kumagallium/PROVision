@@ -42,6 +42,18 @@
       "@id": "provision:pixelOrigin",
       "@type": "xsd:string"
     },
+    "sourceFileDigest": {
+      "@id": "provision:sourceFileDigest",
+      "@type": "xsd:string"
+    },
+    "sourceFileMediaType": {
+      "@id": "provision:sourceFileMediaType",
+      "@type": "xsd:string"
+    },
+    "sourceFileName": {
+      "@id": "provision:sourceFileName",
+      "@type": "xsd:string"
+    },
     "commandTemplate": {
       "@id": "provision:commandTemplate",
       "@type": "xsd:string"

@@ -79,6 +79,11 @@ export function validateImagePlan(
   }
   const tool = raw.tool
   const spec = imageToolDefinition(tool)
+  // 取り込みのように、画面のファイル操作からしか起きないツール（D-019）。
+  // 「取り込んで」と言われても渡すファイルが無いので、計画の段階で拒む
+  if (spec.selectableByInstruction === false) {
+    throw new Error(`${tool}は指示からは選べません`)
+  }
   if (spec.requiresSourceImage === 'forbidden' && context.hasSourceImage) {
     throw new Error(`編集元画像がある場合は${tool}を選べません`)
   }
