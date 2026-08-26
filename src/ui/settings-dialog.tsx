@@ -118,6 +118,7 @@ export function SettingsDialog({
   const [tab, setTab] = useState<SettingsTab>('general')
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [identity, setIdentity] = useState<Identity>({ name: '', email: '' })
+  const [forbidSynthesis, setForbidSynthesis] = useState(false)
   const [saved, setSaved] = useState(false)
   const [aiRegistry, setAiRegistry] = useState<AiModelRegistry | null>(null)
   const [plannerDraft, setPlannerDraft] = useState({ enabled: false, selectedModelId: '' })
@@ -146,6 +147,10 @@ export function SettingsDialog({
   useEffect(() => {
     void appVersion().then(setVersion)
 
+    void apiFetch('api/policy')
+      .then((r) => r.json() as Promise<{ forbidSynthesis?: boolean }>)
+      .then((p) => setForbidSynthesis(p.forbidSynthesis === true))
+      .catch(() => undefined)
     void apiFetch('api/identity')
       .then((r) => r.json())
       .then((v: Identity) => setIdentity(v))
@@ -598,6 +603,36 @@ export function SettingsDialog({
                 <code>data/run</code> に置かれます。
               </p>
             )}
+
+            <label style={LABEL}>画素を作る操作を使わない</label>
+            <p style={{ fontSize: 12, color: '#5c6b73', margin: '0 0 8px' }}>
+              入力に無かった画素を作る操作（生成・生成編集・
+              <strong>選択範囲の消去</strong>）を、計画の段階で断ります。
+              回転・切り抜き・リサイズ・明るさ・コントラスト・ロゴタイプ・背景透明化は使えます。
+              <br />
+              消去（LaMa）も断るのは、<strong>消した跡を周囲から描いている</strong>ためです。
+              乱数を使わないので再現はしますが、画素は作られています。
+              <br />
+              <strong>この設定自体は来歴に書きません。</strong>
+              残すのは実際に実行されたものだけで、系譜の「画素の由来」を見れば、
+              画素を作る手が 1 本も無いことは確定的に言えます。
+            </p>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={forbidSynthesis}
+                onChange={(e) => {
+                  const next = e.target.checked
+                  setForbidSynthesis(next)
+                  void apiFetch('api/policy', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ forbidSynthesis: next }),
+                  }).catch(() => setForbidSynthesis(!next))
+                }}
+              />
+              画素を作る操作を断る
+            </label>
 
             <label style={LABEL}>あなたの identity</label>
             <p style={{ fontSize: 12, color: '#5c6b73', margin: '0 0 8px' }}>

@@ -17,7 +17,13 @@ const JIMP_MODEL = 'jimp-1.6.1'
 
 export type StandardImageTool = Extract<
   ImageToolName,
-  'image.trim' | 'image.crop-square' | 'image.rotate' | 'image.resize' | 'image.wordmark'
+  | 'image.trim'
+  | 'image.crop-square'
+  | 'image.rotate'
+  | 'image.resize'
+  | 'image.wordmark'
+  | 'image.brightness'
+  | 'image.contrast'
 >
 
 /** 帯の高さは文字高に対する比。シンボルと文字が窮屈にならない値（試作で決めた） */
@@ -156,6 +162,13 @@ export async function processStandardImage(input: StandardImageInput): Promise<G
       w: size,
       h: size,
     })
+  } else if (input.tool === 'image.brightness') {
+    // Jimp の brightness は倍率で、1 が無変換。amount は「無変換からの変化率（％）」なので
+    // 1 + amount/100 に直す。**画像全体に同じ規則をかける**（局所補正はしない。D-020）
+    image.brightness(1 + (input.arguments.amount ?? 0) / 100)
+  } else if (input.tool === 'image.contrast') {
+    // Jimp の contrast は -1〜1 で 0 が無変換。amount はそのまま％
+    image.contrast((input.arguments.amount ?? 0) / 100)
   } else if (input.tool === 'image.rotate') {
     image.rotate(input.arguments.angle!)
   } else if (input.tool === 'image.resize') {

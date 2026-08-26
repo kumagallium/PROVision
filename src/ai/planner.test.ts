@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { planImageOperation, ruleBasedPlan, validateImagePlan } from './planner.js'
+import {
+  SynthesisForbiddenError,
+  planImageOperation,
+  ruleBasedPlan,
+  validateImagePlan,
+} from './planner.js'
+import { toolCatalogForPrompt } from './tools.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -375,5 +381,67 @@ describe('画像ツールプランナー', () => {
         { hasSourceImage: true, hasEditRegion: false },
       ),
     ).toThrow('width')
+  })
+})
+
+describe('画素を作る操作を使わない設定（D-020）', () => {
+  const edit = { hasSourceImage: true, hasEditRegion: false, forbidSynthesis: true }
+
+  it('画素を作るツールは計画の段階で断る。実行してからでは遅い', () => {
+    for (const tool of ['image.generate', 'image.edit', 'image.erase']) {
+      expect(
+        () =>
+          validateImagePlan(
+            { tool, arguments: {} },
+            { hasSourceImage: tool !== 'image.generate', hasEditRegion: true, forbidSynthesis: true },
+          ),
+        `${tool}は断られなければならない`,
+      ).toThrow(SynthesisForbiddenError)
+    }
+  })
+
+  it('画素を作らないツールはそのまま通る', () => {
+    expect(ruleBasedPlan('90度回転して', edit).tool).toBe('image.rotate')
+    expect(ruleBasedPlan('20%明るくして', edit).tool).toBe('image.brightness')
+    expect(ruleBasedPlan('コントラストを30上げて', edit).tool).toBe('image.contrast')
+    expect(ruleBasedPlan('正方形に切り抜いて', edit).tool).toBe('image.crop-square')
+    expect(ruleBasedPlan('背景を透明にして', edit).tool).toBe('background.remove')
+  })
+
+  it('落とし先を作らない。黙って別のツールを動かさない', () => {
+    // 規則で確定できない指示は、ふだんは image.edit へ落ちる。そこが禁じられている
+    expect(() => ruleBasedPlan('もっといい感じにして', edit)).toThrow(SynthesisForbiddenError)
+    expect(() => ruleBasedPlan('もっといい感じにして', edit)).toThrow(/画素を作らない操作/)
+  })
+
+  it('画像がまだ無いときは、取り込みへ案内する', () => {
+    expect(() =>
+      ruleBasedPlan('ロゴを作って', {
+        hasSourceImage: false,
+        hasEditRegion: false,
+        forbidSynthesis: true,
+      }),
+    ).toThrow(/画像を取り込む/)
+  })
+
+  it('設定していなければ、これまでどおり image.edit へ落ちる', () => {
+    expect(ruleBasedPlan('もっといい感じにして', { hasSourceImage: true, hasEditRegion: false }).tool).toBe(
+      'image.edit',
+    )
+  })
+
+  it('LLM へ渡す一覧からも外す。見せると選ばれる', () => {
+    const open = toolCatalogForPrompt()
+    const closed = toolCatalogForPrompt({ forbidSynthesis: true })
+    expect(open).toContain('- image.generate:')
+    for (const tool of ['image.generate', 'image.edit', 'image.erase']) {
+      expect(closed, `${tool}を一覧へ載せてはいけない`).not.toContain(`- ${tool}:`)
+    }
+    // 一覧から外しても、別のツールの注意書きが image.edit を名指しする。
+    // 名指しされても選ばせないと明記しておく
+    expect(closed).toContain('Choose only from the tools listed above')
+    // 使えるものは残る
+    expect(closed).toContain('image.rotate')
+    expect(closed).toContain('image.brightness')
   })
 })
