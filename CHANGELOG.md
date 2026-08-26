@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.3](https://github.com/kumagallium/PROVision/compare/v0.2.2...v0.2.3) - 2026-08-26
+
+- feat(prov): 外から持ち込んだ画像を取り込めるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/13
+- feat(prov): 画素を作る操作を使わない設定を足す by @kumagallium in https://github.com/kumagallium/PROVision/pull/16
+
 ## [v0.2.2](https://github.com/kumagallium/PROVision/compare/v0.2.1...v0.2.2) - 2026-08-26
 
 - feat(prov): 版が食い違ったとき、どこが違うか出せるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/10
