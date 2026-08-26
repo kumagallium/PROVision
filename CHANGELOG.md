@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.4](https://github.com/kumagallium/PROVision/compare/v0.2.3...v0.2.4) - 2026-08-26
+
+- feat(ui): 1つの指示から候補を複数出せるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/17
+
 ## [v0.2.3](https://github.com/kumagallium/PROVision/compare/v0.2.2...v0.2.3) - 2026-08-26
 
 - feat(prov): 外から持ち込んだ画像を取り込めるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/13
