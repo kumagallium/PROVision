@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ProvGraph } from '../prov/graph.js'
@@ -64,11 +64,23 @@ export function App() {
     await load()
   }, [load])
 
-  /** いま話している会話の根。真ん中の面はこの会話だけを描く */
-  const currentRoot = useMemo(
-    () => (graph && current ? graph.rootOf(current) : undefined),
-    [graph, current],
-  )
+  /**
+   * いま話している会話の根。真ん中の面はこの会話だけを描く。
+   *
+   * **引けなかったときは直前の根を保つ。** グラフと `current` の更新が一瞬ずれると
+   * 根が引けなくなり、真ん中の面が「左から会話を選ぶと…」に戻る——
+   * 利用者からは**グラフが消えた**ように見える。会話を選び直すまで空にしない
+   */
+  const lastRoot = useRef<string | undefined>(undefined)
+  const currentRoot = useMemo(() => {
+    if (!graph || !current) {
+      lastRoot.current = undefined
+      return undefined
+    }
+    const root = graph.rootOf(current)
+    if (root) lastRoot.current = root
+    return root ?? lastRoot.current
+  }, [graph, current])
 
   /**
    * 真ん中の面は**その会話だけ**を描く。会話を選んでいないときは何も描かない。

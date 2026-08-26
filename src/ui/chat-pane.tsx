@@ -101,13 +101,18 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
     /**
      * 1 枚できるたびに画面へ出す。サーバは 1 枚ずつ記録して保存するので、
      * 待っている間にグラフを取り直せば途中経過が見える。
-     * まとめて返るのを待つと、4 枚で 10 分近く何も出ない
+     * まとめて返るのを待つと、4 枚で 10 分近く何も出ない。
+     *
+     * **終わったあとに届いた分は捨てる。** 送信中に投げた取得が最後の応答より遅れて
+     * 届くと、**できたばかりの版を含まないグラフで上書きしてしまう**。そうなると
+     * いま居る版がグラフから引けなくなり、真ん中の面が空になる
      */
+    let finished = false
     const poll = window.setInterval(() => {
       void apiFetch('api/graph')
         .then((r) => (r.ok ? (r.json() as Promise<ProvJsonLdDocument>) : null))
         .then((doc) => {
-          if (doc) onGraph(doc)
+          if (doc && !finished) onGraph(doc)
         })
         .catch(() => undefined)
     }, 2500)
@@ -155,6 +160,7 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
+      finished = true
       window.clearInterval(poll)
       setBusy(false)
       setBornBefore(new Set())
