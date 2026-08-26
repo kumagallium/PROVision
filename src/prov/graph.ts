@@ -6,6 +6,7 @@
  *   - 再実行に要る情報が欠けた記録は受け付けない
  */
 import type {
+  InstructionPlan,
   AssertionActivity,
   GenerationActivity,
   ImageEntity,
@@ -21,6 +22,7 @@ import {
   assertionIri,
   figureIri,
   imageIri,
+  planIri,
   sha256,
 } from './iri.js'
 
@@ -84,6 +86,8 @@ export interface RecordGenerationInput {
   plannerModel?: string
   selectedTool?: string
   toolArguments?: string
+  /** どの送信から走ったか（D-022）。候補が 2 本以上のときだけ渡す */
+  planId?: Iri
   sourceFileDigest?: string
   sourceFileMediaType?: string
   sourceFileName?: string
@@ -108,6 +112,7 @@ export class ProvGraph {
   private readonly activities = new Map<Iri, GenerationActivity>()
   private readonly assertions = new Map<Iri, AssertionActivity>()
   private readonly agents = new Map<Iri, ProvAgent>()
+  private readonly plans = new Map<Iri, InstructionPlan>()
 
   constructor(base: string = DEFAULT_BASE) {
     this.base = base
@@ -119,6 +124,7 @@ export class ProvGraph {
     for (const e of data.entities) g.entities.set(e.id, e)
     for (const act of data.activities) g.activities.set(act.id, act)
     for (const a of data.assertions ?? []) g.assertions.set(a.id, a)
+    for (const p of data.plans ?? []) g.plans.set(p.id, p)
     return g
   }
 
@@ -129,7 +135,36 @@ export class ProvGraph {
       entities: [...this.entities.values()],
       activities: [...this.activities.values()],
       assertions: [...this.assertions.values()],
+      plans: [...this.plans.values()],
     }
+  }
+
+  /**
+   * 1 回の送信を置く（D-022）。**同じ指示・同じ時刻なら同じ Plan** に収束する。
+   * 呼ぶのは、その送信から Activity が 2 本以上走るときだけ
+   */
+  addPlan(label: string, startedAtTime: string): InstructionPlan {
+    const id = planIri(this.base, `${label}\u0000${startedAtTime}`)
+    const existing = this.plans.get(id)
+    if (existing) return existing
+    const plan: InstructionPlan = { id, label, startedAtTime }
+    this.plans.set(id, plan)
+    return plan
+  }
+
+  listPlans(): InstructionPlan[] {
+    return [...this.plans.values()]
+  }
+
+  getPlan(id: Iri): InstructionPlan | undefined {
+    return this.plans.get(id)
+  }
+
+  /** その送信から走った Activity。生まれた順に返す */
+  activitiesOfPlan(planId: Iri): GenerationActivity[] {
+    return this.listActivities()
+      .filter((a) => a.planId === planId)
+      .sort((a, b) => a.startedAtTime.localeCompare(b.startedAtTime) || a.id.localeCompare(b.id))
   }
 
   /**
@@ -302,6 +337,7 @@ export class ProvGraph {
       ...(input.plannerModel ? { plannerModel: input.plannerModel } : {}),
       ...(input.selectedTool ? { selectedTool: input.selectedTool } : {}),
       ...(input.toolArguments ? { toolArguments: input.toolArguments } : {}),
+      ...(input.planId ? { planId: input.planId } : {}),
       ...(input.sourceFileDigest ? { sourceFileDigest: input.sourceFileDigest } : {}),
       ...(input.sourceFileMediaType
         ? { sourceFileMediaType: input.sourceFileMediaType }
@@ -351,6 +387,8 @@ export class ProvGraph {
       .filter((e): e is ImageEntity => e !== undefined)
       // 出し直して食い違った版は、元の版と同じ会話に属する。会話の根ではない
       .filter((e) => !(e.alternateOf && this.entities.has(e.alternateOf)))
+      // 同じ送信から生まれた候補も 1 つの会話。根はその最初の 1 件だけ（D-022）
+      .filter((e) => this.rootOf(e.id) === e.id)
   }
 
   /** その画像が属する会話の根 */
@@ -367,6 +405,16 @@ export class ProvGraph {
         if (alternate && this.entities.has(alternate)) {
           current = alternate
           continue
+        }
+        /**
+         * 親が無い候補は兄弟になりようがないが、**同じ指示から生まれている**（D-022）。
+         * 1 つ頼んだのに会話が N 個増えるのを避けるため、その送信で最初に生まれた版へ寄せる
+         */
+        if (act.planId) {
+          const first = this.activitiesOfPlan(act.planId)[0]
+          if (first && first.generated !== current && this.entities.has(first.generated)) {
+            return first.generated
+          }
         }
         return current
       }

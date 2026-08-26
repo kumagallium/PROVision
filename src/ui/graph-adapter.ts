@@ -7,7 +7,7 @@
 import type { ProvGraph } from '../prov/graph.js'
 import type { GenerationActivity, ImageEntity, Iri } from '../prov/types.js'
 
-export type FlowNodeKind = 'image' | 'activity' | 'external'
+export type FlowNodeKind = 'image' | 'activity' | 'external' | 'plan'
 
 export interface FlowNodeData {
   kind: FlowNodeKind
@@ -18,6 +18,8 @@ export interface FlowNodeData {
   activity?: GenerationActivity
   /** 外部リソースノードのみ */
   iri?: Iri
+  /** 指示ノードのみ。その送信から走った本数 */
+  branches?: number
   [key: string]: unknown
 }
 
@@ -33,7 +35,7 @@ export interface FlowEdge {
   source: string
   target: string
   /** 生成の辺か、人間が参照した辺か。見た目を変える */
-  data: { kind: 'used' | 'referenced' | 'generated' | 'alternate' }
+  data: { kind: 'used' | 'referenced' | 'generated' | 'alternate' | 'planned' }
 }
 
 /**
@@ -94,6 +96,29 @@ export function toFlow(
     }
   }
 
+  /**
+   * 1 回の送信（D-022）。**候補が枝分かれする起点**なので、指示を節点として置く。
+   * 親が無い候補は兄弟になりようがないが、同じ指示からは生まれている
+   */
+  const plans = new Set<Iri>()
+  for (const activity of activities) {
+    if (activity.planId) plans.add(activity.planId)
+  }
+  for (const planId of plans) {
+    const plan = graph.getPlan(planId)
+    if (!plan) continue
+    nodes.push({
+      id: plan.id,
+      type: 'plan',
+      position: { ...at },
+      data: {
+        kind: 'plan',
+        label: plan.label,
+        branches: activities.filter((a) => a.planId === plan.id).length,
+      },
+    })
+  }
+
   const externals = new Set<Iri>()
   for (const activity of activities) {
     nodes.push({
@@ -123,6 +148,14 @@ export function toFlow(
         source: ref,
         target: activity.id,
         data: { kind: 'referenced' },
+      })
+    }
+    if (activity.planId && plans.has(activity.planId)) {
+      edges.push({
+        id: `${activity.planId}~>${activity.id}`,
+        source: activity.planId,
+        target: activity.id,
+        data: { kind: 'planned' },
       })
     }
     edges.push({

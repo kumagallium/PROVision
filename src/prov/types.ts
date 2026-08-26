@@ -110,6 +110,11 @@ export interface GenerationActivity extends ReproducibleSpec {
    * `prov:used` として書く。責任者は wasAssociatedWith の人間 Agent。
    */
   referenced: Iri[]
+  /**
+   * どの送信から走ったか（D-022）。`prov:qualifiedAssociation` → `prov:hadPlan` として
+   * 書き出す。**候補が 2 本以上走ったときだけ付く**
+   */
+  planId?: Iri
   /** この Activity が生んだ画像 */
   generated: Iri
   wasAssociatedWith: Iri[]
@@ -152,6 +157,23 @@ export interface PublishedFigure {
   partOf: Iri
 }
 
+/**
+ * 1 回の送信（D-022）。**利用者の 1 つの指示**そのもので、`prov:Plan` として書き出す。
+ *
+ * 置く理由は「候補が同じ指示から生まれた」ことを言うため。親が無い候補は兄弟に
+ * なりようがないので、これが無いと 1 つの依頼が複数の会話に割れる。
+ * `prov:Plan` は `prov:Entity` の下位なので、新しい語彙は要らない（D-004）。
+ *
+ * **1 つの送信から Activity が 1 本しか走らないときは作らない。** そのときは
+ * Activity の `provision:intent` が同じことを言っており、足しても言えることが増えない。
+ */
+export interface InstructionPlan {
+  id: Iri
+  /** 利用者が書いた指示そのもの */
+  label: string
+  startedAtTime: string
+}
+
 export type AgentKind = 'SoftwareAgent' | 'Person' | 'Organization'
 
 export interface ProvAgent {
@@ -189,6 +211,8 @@ export interface ProvGraphData {
   base: string
   entities: ImageEntity[]
   activities: GenerationActivity[]
+  /** 1 回の送信。古いファイルには無いので省略可（D-022） */
+  plans?: InstructionPlan[]
   /** 後から人が表明したこと。古いファイルには無いので省略可 */
   assertions?: AssertionActivity[]
   agents: ProvAgent[]

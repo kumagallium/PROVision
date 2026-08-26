@@ -911,16 +911,6 @@ app.post('/api/generate', async (c) => {
       : 1
     const notices: string[] = []
     let variantPrompts = [basePrompt]
-    if (wantedVariants > 1 && !body.parent) {
-      /**
-       * 候補は兄弟として記録される（D-018）が、親が無ければ兄弟になりようがない。
-       * それぞれが会話の根になる——材料を共有していないので、系譜としても別物である。
-       * 束ねる語彙は足さないと決めた以上、この結果を画面で伏せない
-       */
-      notices.push(
-        '親が無い生成なので、候補はそれぞれ別の会話になります（材料を共有していないため、系譜としても別物です）',
-      )
-    }
     if (wantedVariants > 1) {
       const planner = await plannerCredentials(DATA_DIR)
       if (planner?.enabled && planner.modelId.trim()) {
@@ -964,6 +954,15 @@ app.post('/api/generate', async (c) => {
             Number.parseInt(sha256(`${variantPrompt}${stamp}${index}`).slice(0, 8), 16) % 2 ** 31
         : 0,
     }))
+
+    /**
+     * 候補が 2 本以上走るなら、その送信を `prov:Plan` として置く（D-022）。
+     * 親が無い候補は兄弟になりようがないので、これが無いと 1 つの依頼が
+     * 複数の会話に割れる。1 本だけのときは作らない——Activity の
+     * `provision:intent` が同じことを言っており、足しても言えることが増えない
+     */
+    const sendPlan =
+      variants.length > 1 ? graph.addPlan(instruction, new Date(stamp).toISOString()) : undefined
 
     const entities: ImageEntity[] = []
     let firstError: unknown
@@ -1072,7 +1071,8 @@ app.post('/api/generate', async (c) => {
                     maskImageLocation: `images/${maskImage.digest.slice(0, 16)}.png`,
                   }
                 : {}),
-              planningMode: planning.mode,
+              ...(sendPlan ? { planId: sendPlan.id } : {}),
+            planningMode: planning.mode,
               ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
               ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
               selectedTool: plan.tool,

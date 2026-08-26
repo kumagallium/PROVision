@@ -11,6 +11,7 @@ import type {
   AssertionActivity,
   GenerationActivity,
   ImageEntity,
+  InstructionPlan,
   ProvAgent,
   ProvGraphData,
 } from './types.js'
@@ -211,7 +212,19 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
     })
   }
 
+  // 1 回の送信（D-022）。prov:Plan は prov:Entity の下位なので新しい語彙は要らない
+  for (const plan of data.plans ?? []) {
+    nodes.push({
+      '@id': plan.id,
+      '@type': 'Plan',
+      label: lit(plan.label),
+      // Plan は Entity なので startedAtTime は使えない。生まれた時刻で言う
+      generatedAtTime: lit(plan.startedAtTime, `${XSD}dateTime`),
+    })
+  }
+
   for (const a of data.activities) nodes.push(activityNode(a))
+
 
   // 後から人が表明したこと（D-008）。生成の Activity と同じ prov:Activity だが、
   // provision:prompt を持たないことで読み戻し時に区別できる
@@ -259,7 +272,20 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
     }
     nodes.push({ '@type': 'Generation', activity: a.id, entity: a.generated })
     for (const agent of a.wasAssociatedWith) {
-      nodes.push({ '@type': 'Association', activity: a.id, agent })
+      /**
+       * どの送信から走ったか（D-022）は、この限定表現に載せる。`prov:hadPlan` は
+       * Association の述語なので、素の PROV で言うにはここを通すしかない。
+       * **載せる先は人間 Agent の Association だけ**——計画を持つのは責任者である（D-006）
+       */
+      const responsible =
+        a.planId !== undefined &&
+        data.agents.find((item) => item.id === agent)?.kind === 'Person'
+      nodes.push({
+        '@type': 'Association',
+        activity: a.id,
+        agent,
+        ...(responsible ? { hadPlan: a.planId! } : {}),
+      })
     }
   }
 
@@ -282,6 +308,9 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
   const entities: ImageEntity[] = []
   const agents: ProvAgent[] = []
   const activityNodes: JsonLdNode[] = []
+  const plans: InstructionPlan[] = []
+  /** Association から Activity へ引き直す。断片を落とせば元の Activity の IRI に戻る */
+  const planByActivity = new Map<string, string>()
   /** 掲載された figure。どの表明が生んだかで引けるようにしておく */
   const figureByActivity = new Map<string, { id: string; label: string; partOf: string }>()
 
@@ -336,9 +365,24 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
           ? { platform: String(firstValue(n, 'provision:platform')) }
           : {}),
       })
+    } else if (t === 'Plan') {
+      plans.push({
+        id,
+        label: String(firstValue(n, 'label') ?? id),
+        startedAtTime: String(firstValue(n, 'generatedAtTime') ?? ''),
+      })
     } else if (t === 'Activity') {
       activityNodes.push(n)
     }
+  }
+
+  // Association ノードから「どの送信から走ったか」を引く（D-022）。
+  // 限定表現には @id が無いので、上の分類（@id が要る）では拾えない
+  for (const n of nodes) {
+    if (typeOf(n) !== 'Association') continue
+    const activity = idList(n, 'activity')[0]
+    const plan = idList(n, 'hadPlan')[0]
+    if (activity && plan) planByActivity.set(activity, plan)
   }
 
   // Generation ノードから「どの Activity がどの Entity を生んだか」を引く
@@ -488,6 +532,13 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
     }
     })
 
-  const data: ProvGraphData = { base, entities, activities, assertions, agents }
+  // Plan が消えている記録で planId だけ残すと、辿れない参照になる
+  const known = new Set(plans.map((p) => p.id))
+  for (const activity of activities) {
+    const plan = planByActivity.get(activity.id)
+    if (plan && known.has(plan)) activity.planId = plan
+  }
+
+  const data: ProvGraphData = { base, entities, activities, assertions, agents, plans }
   return ProvGraph.from(data)
 }
