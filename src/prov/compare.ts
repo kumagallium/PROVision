@@ -42,6 +42,7 @@ const ACTIVITY_FIELDS: ReadonlyArray<{
   { label: 'prompt', of: (a) => a.prompt },
   { label: 'negative prompt', of: (a) => a.negativePrompt },
   { label: 'model', of: (a) => a.model },
+  { label: 'provider', of: (a) => a.provider },
   { label: 'seed', of: (a) => String(a.seed) },
   { label: 'steps', of: (a) => (a.steps === undefined ? undefined : String(a.steps)) },
   { label: 'guidance', of: (a) => (a.guidance === undefined ? undefined : String(a.guidance)) },
@@ -61,6 +62,12 @@ const ACTIVITY_FIELDS: ReadonlyArray<{
   { label: 'planning', of: (a) => a.planningMode },
   { label: 'planner model', of: (a) => a.plannerModel },
   { label: 'reproducibility', of: (a) => a.reproducibility },
+  // ここから下は D-019 / D-020 で足した項目。**足したら必ずここにも入れる**——
+  // 記録はされているのに突き合わせに出てこないと、食い違いを見落とす
+  { label: 'pixel origin', of: (a) => a.pixelOrigin },
+  { label: 'source file', of: (a) => a.sourceFileName },
+  { label: 'source file sha256', of: (a) => a.sourceFileDigest },
+  { label: 'source type', of: (a) => a.sourceFileMediaType },
 ]
 
 /** 環境の層。Agent 1 件につきこの 3 項目を見る */

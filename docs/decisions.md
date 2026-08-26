@@ -703,7 +703,12 @@ mflux の `--image` は 1 枚しか取らない（[`src/image/mflux.ts`](../src/
 
 ## 実装するときに触る場所（D-018〜D-021 共通、決定ではなく覚え書き）
 
-D-019・D-020・D-021 はいずれも `provision:` の語を増やす。**1 語増やすと 5 か所要る。**
+D-019・D-020・D-021 はいずれも `provision:` の語を増やす。**1 語増やすと 7 か所要る。**
+
+> **2026-08-26 追記。** 当初 5 か所と書いたが、**足りていなかった**。`pixelOrigin` と
+> `sourceFile*` を足したとき、記録も書き出しもできているのに**突き合わせ（D-017）にも
+> 画面にも出てこない**状態が 3 フェーズぶん残った。記録されているのに検査に出てこない
+> 項目は、無いのと同じである。下の表の最後の 2 行がその抜けである。
 
 | 場所 | 何をする |
 |---|---|
@@ -712,6 +717,12 @@ D-019・D-020・D-021 はいずれも `provision:` の語を増やす。**1 語�
 | [`src/prov/jsonld.ts`](../src/prov/jsonld.ts) | **書き出しと読み込みの両方**。値を絞る語は `REPRODUCIBILITY_VALUES` に相当する定数も |
 | [`src/prov/ntriples.ts`](../src/prov/ntriples.ts) | N-Triples の述語表 |
 | [`docs/schema/context.jsonld`](schema/context.jsonld) | 自分で配信する `@context`（D-009） |
+| [`src/prov/compare.ts`](../src/prov/compare.ts) | **突き合わせる項目**。ここを落とすと食い違いを見落とす（D-017） |
+| [`src/ui/detail-panel.tsx`](../src/ui/detail-panel.tsx) | **画面に出す項目**。記録しても見えなければ確かめようがない |
+
+`compare.test.ts` の「記録した項目の割り振り」は `Required<GenerationActivity>` を使って
+いるので、**型へ項目を足した時点でコンパイルできなくなる**。そこで「比べるのか、
+比べないならなぜか」を決めることになる。注意深さではなく構造で止める（D-012 と同じ動機）。
 
 **`@context` を落とすと、書き出したファイルは PROVision の外で語が解けなくなる。**
 グラフの中では動くので、画面では最後まで気づかない。

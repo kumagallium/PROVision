@@ -56,10 +56,16 @@ export function DetailPanel({
       <h3 style={H}>再実行に要る情報</h3>
       <code style={CODE}>
         {[
+          // 頼んだこと（intent）と実行されたこと（prompt）を**並べて出す**。
+          // 別々に残しているのは突き合わせられるようにするためで（D-003）、
+          // 片方しか見えないとその意味が無い。書き直しが入ればここで差が見える
+          ...(activity.intent ? [`intent: ${activity.intent}`] : []),
           `prompt: ${activity.prompt}`,
+          ...(activity.negativePrompt ? [`negative prompt: ${activity.negativePrompt}`] : []),
           `model:  ${activity.model}`,
           `seed:   ${activity.seed}`,
           ...(activity.steps !== undefined ? [`steps:  ${activity.steps}`] : []),
+          ...(activity.guidance !== undefined ? [`guidance: ${activity.guidance}`] : []),
           ...(activity.width !== undefined
             ? [`size:   ${activity.width}x${activity.height ?? activity.width}`]
             : []),
@@ -90,6 +96,12 @@ export function DetailPanel({
                 }`,
               ]
             : []),
+          // 実行したコマンドの雛形（D-017）。PROVISION_IMAGE_COMMAND を差し替えた差は
+          // 他の項目からは見えない。突き合わせでは見ているのに画面に無かった
+          ...(activity.commandTemplate ? [`command: ${activity.commandTemplate}`] : []),
+          ...(activity.provider ? [`provider: ${activity.provider}`] : []),
+          // いつ走ったか。D-002 で再実行に要る情報として必須にしているのに出ていなかった
+          `executed: ${activity.startedAtTime} → ${activity.endedAtTime}`,
         ].join('\n')}
       </code>
 
