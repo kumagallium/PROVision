@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.9](https://github.com/kumagallium/PROVision/compare/v0.2.8...v0.2.9) - 2026-08-26
+
+- fix(config): 更新のたびに AI モデルの登録が消えるのを直す by @kumagallium in https://github.com/kumagallium/PROVision/pull/30
+
 ## [v0.2.8](https://github.com/kumagallium/PROVision/compare/v0.2.7...v0.2.8) - 2026-08-26
 
 - docs: D-020 の表を実装に合わせる by @kumagallium in https://github.com/kumagallium/PROVision/pull/27
