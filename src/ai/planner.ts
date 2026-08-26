@@ -415,6 +415,90 @@ async function callPlanner(
   return content || (choice?.message?.reasoning_content ?? '')
 }
 
+/** 1 回の送信で出せる候補の上限。1 枚 1〜3 分の直列実行なので、4 枚で 10 分前後になる */
+export const MAX_VARIANTS = 4
+
+/** 全角の数字を半角へ。指示は手で書かれるので、どちらでも来る */
+function normalizeDigits(text: string): string {
+  return text.replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+}
+
+/**
+ * 「候補を複数」と頼まれているか（D-018）。
+ *
+ * **数は読み取らない。** 何枚出すかは画面の「候補」で選んでもらう——
+ * 自然言語から数を推測すると、外したときに黙って違う枚数が出る。ここで見るのは
+ * 「複数を求めている指示なのに 1 枚設定になっている」ことに気づくためだけである。
+ */
+export function asksForMultipleCandidates(intent: string): boolean {
+  const text = normalizeDigits(intent)
+  const candidate = /(候補|案|パターン|バリエーション|variation|option)/i.test(text)
+  const multiple =
+    /(\d+\s*[つ個枚案]|[二三四五六七八九]\s*[つ個枚案]|複数|いくつか|several|multiple|\d+\s*(variations?|options?|patterns?))/i.test(
+      text,
+    )
+  return candidate && multiple
+}
+
+/**
+ * 方向の違う候補を作らせる（D-018 の B 段）。
+ *
+ * **ここだけ「頼まれていない様式を足すな」の縛りを外す。** 方向の違う案を作るとは、
+ * 利用者が言っていない要素を足すことそのものだからである。
+ *
+ * 縛りは緩めるが、**外した事実は記録に残る**——実行された全文は `provision:prompt`、
+ * 利用者の生の言葉は `provision:intent` として版ごとに別々に残るので、何を頼んで
+ * 何が足されたかは常に突き合わせられる。だから新しい語彙は要らない。
+ */
+export async function proposeVariantPrompts(input: {
+  intent: string
+  /** 1 案だけ作るときに使う書き直し。ここからばらす */
+  basePrompt: string
+  count: number
+  /** 描く文字列が決まっているなら、全案がそれを含まなければならない */
+  text?: string
+  lineage?: string[]
+  planner: AiPlannerConfig & { apiKey: string }
+  signal?: AbortSignal
+}): Promise<string[]> {
+  const count = Math.min(Math.max(Math.trunc(input.count), 2), MAX_VARIANTS)
+  const prompt = [
+    `You propose ${count} DIFFERENT directions for one image request.`,
+    'Return JSON only: {"prompts":["...","..."]}.',
+    `Give exactly ${count} concise English instructions for an image model.`,
+    'Each must be a genuinely different direction — different composition, metaphor, or visual treatment. Do not restate the same idea in other words.',
+    'Keep every explicit user constraint in all of them. Max 2 sentences each.',
+    ...(input.text
+      ? [`Every prompt must contain the exact string ${JSON.stringify(input.text)}.`]
+      : []),
+    ...(input.lineage?.length
+      ? [`Prior instructions in this lineage (oldest first): ${JSON.stringify(input.lineage)}`]
+      : []),
+    `User instruction: ${JSON.stringify(input.intent)}`,
+    `Baseline prompt: ${JSON.stringify(input.basePrompt)}`,
+  ].join('\n')
+
+  const parsed = extractJson(await callPlanner(input.planner, prompt, input.signal)) as {
+    prompts?: unknown
+  }
+  const unique = [
+    ...new Set(
+      (Array.isArray(parsed.prompts) ? parsed.prompts : [])
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.replace(/\s+/g, ' ').trim())
+        .filter(
+          (value) =>
+            value.length > 0 && value.length <= 600 && !/[\u0000-\u001f\u007f]/.test(value),
+        )
+        // 推定した文字列が落ちると、描画対象が失われる（validateImagePlan と同じ縛り）
+        .filter((value) => !input.text || value.includes(input.text)),
+    ),
+  ]
+  // 1 案しか残らないなら候補になっていない。seed 違いへ落として、そう伝える
+  if (unique.length < 2) throw new Error('方向の違う案を作れませんでした')
+  return unique.slice(0, count)
+}
+
 export async function planImageOperation(input: {
   intent: string
   context: PlanningContext

@@ -33,6 +33,8 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [routingNotice, setRoutingNotice] = useState<string | null>(null)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
+  /** 1 回の送信で出す候補の数（D-018）。**指示から数は読み取らない** */
+  const [variants, setVariants] = useState(1)
   const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
   const chain = graph && current ? graph.lineage(current) : []
@@ -60,6 +62,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         body: JSON.stringify({
           intent,
           ...(current ? { parent: current } : {}),
+          ...(variants > 1 ? { variants } : {}),
           ...(editRegion
             ? {
                 maskedImage: editRegion.maskedImage,
@@ -116,7 +119,15 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
 
         {chain.map((a) => {
           const entity = graph?.getEntity(a.generated)
-          const url = entity ? imageUrlOf(entity) : undefined
+          /**
+           * その版の親から生えたものを全部並べる。**候補は兄弟として記録される**ので
+           * （D-018）、別の状態を持たなくてもグラフから導ける。後から生やした枝も
+           * 同じ列に出る——どちらも「この版から生えたもの」で、区別する記録が無い
+           */
+          const parent = a.used[0]
+          const siblings = parent ? (graph?.children(parent) ?? []) : []
+          const shown = siblings.length > 1 ? siblings : entity ? [entity] : []
+          const thumbWidth = shown.length > 1 ? 104 : 220
           return (
             <div key={a.id} style={{ marginBottom: 16 }}>
               <div
@@ -132,31 +143,39 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
               >
                 {a.intent ?? <span style={{ color: '#7b8892' }}>（最初の指示）{a.label}</span>}
               </div>
-              {url ? (
-                <button
-                  type="button"
-                  onClick={() => entity && onSelect(entity.id)}
-                  style={{
-                    display: 'block',
-                    marginTop: 8,
-                    padding: 0,
-                    border:
-                      entity?.id === current
-                        ? `2px solid ${PALETTE.image.main}`
-                        : '1px solid #e0e5e8',
-                    borderRadius: 10,
-                    overflow: 'hidden',
-                    cursor: 'pointer',
-                    background: 'none',
-                  }}
-                >
-                  <ProvImage
-                    path={url}
-                    alt={entity?.label}
-                    style={{ display: 'block', width: 220 }}
-                  />
-                </button>
+              {shown.length > 1 ? (
+                <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 6 }}>
+                  この版から生えた {shown.length} 件
+                </div>
               ) : null}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {shown.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => onSelect(candidate.id)}
+                    title={candidate.label}
+                    style={{
+                      display: 'block',
+                      padding: 0,
+                      border:
+                        candidate.id === current
+                          ? `2px solid ${PALETTE.image.main}`
+                          : '1px solid #e0e5e8',
+                      borderRadius: 10,
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                      background: 'none',
+                    }}
+                  >
+                    <ProvImage
+                      path={imageUrlOf(candidate)}
+                      alt={candidate.label}
+                      style={{ display: 'block', width: thumbWidth }}
+                    />
+                  </button>
+                ))}
+              </div>
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
                 seed {a.seed} · {a.model}
                 {a.selectedTool ? ` · ${a.selectedTool} (${a.planningMode ?? 'rules'})` : ''}
@@ -217,6 +236,36 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             </span>
           </div>
         ) : null}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 8,
+            fontSize: 11,
+            color: '#5c6b73',
+          }}
+        >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            候補
+            <select
+              value={variants}
+              onChange={(e) => setVariants(Number(e.target.value))}
+              style={{ font: 'inherit', fontSize: 11, padding: '2px 4px' }}
+            >
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span>
+            {variants > 1
+              ? 'AI解釈が有効なら方向の違う案、無効なら seed だけ違う案を出します'
+              : '同じ指示から複数の案を出したいときは数を上げます'}
+          </span>
+        </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}

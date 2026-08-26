@@ -45,9 +45,13 @@ import {
   standardImageCacheKeyOf,
   type StandardImageInput,
 } from '../image/standard.js'
+import type { ImageEntity } from '../prov/types.js'
 import {
+  MAX_VARIANTS,
   SynthesisForbiddenError,
+  asksForMultipleCandidates,
   planImageOperation,
+  proposeVariantPrompts,
   type ImageToolName,
   type PlannedImageOperation,
   validateImagePlan,
@@ -490,6 +494,8 @@ interface GenerateBody {
   referenced?: string[]
   seed?: number
   label?: string
+  /** 1 回の送信で出す候補の数（D-018）。1〜MAX_VARIANTS */
+  variants?: number
 }
 
 /**
@@ -880,7 +886,8 @@ app.post('/api/generate', async (c) => {
           }
         : undefined
     // 親画像を入力できるときは、親の全文プロンプトを次へ持ち越さない。
-    const prompt = useInpainting
+    // 候補を複数出すときは、ここからばらす（D-018）
+    const basePrompt = useInpainting
       ? 'Inpaint the masked region using the surrounding image.'
       : plan.tool === 'image.generate' || plan.tool === 'image.edit'
         ? body.prompt?.trim() ||
@@ -894,150 +901,226 @@ app.post('/api/generate', async (c) => {
           )
         : instruction
     const usesImageModel = plan.tool === 'image.generate' || plan.tool === 'image.edit'
-    const seed = usesImageModel
-      ? Number.isInteger(body.seed)
-        ? body.seed!
-        : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
-          Number.parseInt(sha256(`${prompt}${Date.now()}`).slice(0, 8), 16) % 2 ** 31
-      : 0
 
-    const entity = await serial(async () => {
-      const key = inpaintInput
-        ? inpaintCacheKeyOf(inpaintInput)
-        : standardInput
-          ? standardImageCacheKeyOf(standardInput)
-          : backgroundInput
-            ? backgroundRemovalCacheKeyOf(backgroundInput)
-            : cacheKeyOf(
-                {
-                  prompt,
-                  seed,
-                  ...(conditioningImage
-                    ? {
-                        imageDigest: conditioningImage.digest,
-                        imageStrength: IMAGE_EDIT_STRENGTH,
-                      }
-                    : {}),
-                },
-                // キャッシュ鍵はモデルを含む。編集は別コマンド＝別モデルなので取り違えない
-                modelIdOf(conditioningImage ? resolveImageEditCommand() : resolveImageCommand()),
-              )
-      const cachedPng = join(CACHE_DIR, `${key}.png`)
-      const cachedMeta = join(CACHE_DIR, `${key}.json`)
-
-      let result: GenerateResult
-      if (existsSync(cachedPng) && existsSync(cachedMeta)) {
-        const meta = JSON.parse(await readFile(cachedMeta, 'utf8'))
-        result = { ...meta, png: new Uint8Array(await readFile(cachedPng)) }
+    /**
+     * 候補の数（D-018）。**画像モデルを使う手だけ**に効く。確定的なツールで枚数を
+     * 増やしても同じ画素が出るだけで、同じ Entity に畳まれる（D-001）
+     */
+    const wantedVariants = usesImageModel
+      ? Math.min(Math.max(Math.trunc(Number(body.variants ?? 1)) || 1, 1), MAX_VARIANTS)
+      : 1
+    const notices: string[] = []
+    let variantPrompts = [basePrompt]
+    if (wantedVariants > 1 && !body.parent) {
+      /**
+       * 候補は兄弟として記録される（D-018）が、親が無ければ兄弟になりようがない。
+       * それぞれが会話の根になる——材料を共有していないので、系譜としても別物である。
+       * 束ねる語彙は足さないと決めた以上、この結果を画面で伏せない
+       */
+      notices.push(
+        '親が無い生成なので、候補はそれぞれ別の会話になります（材料を共有していないため、系譜としても別物です）',
+      )
+    }
+    if (wantedVariants > 1) {
+      const planner = await plannerCredentials(DATA_DIR)
+      if (planner?.enabled && planner.modelId.trim()) {
+        try {
+          variantPrompts = await proposeVariantPrompts({
+            intent: instruction,
+            basePrompt,
+            count: wantedVariants,
+            ...(plan.arguments.text ? { text: plan.arguments.text } : {}),
+            lineage: lineageIntents,
+            planner,
+          })
+        } catch (error) {
+          // 方向を作れなかったのは失敗ではない。seed 違いへ落として、そう伝える
+          variantPrompts = Array.from({ length: wantedVariants }, () => basePrompt)
+          notices.push(
+            `方向の違う案を作れなかったので、同じ指示のまま seed だけ変えた候補を出します（${
+              error instanceof Error ? error.message : String(error)
+            }）`,
+          )
+        }
       } else {
-        result = inpaintInput
-          ? await inpaintImage(inpaintInput)
-          : standardInput
-            ? await processStandardImage(standardInput)
-            : backgroundInput
-              ? await removeBackground(backgroundInput)
-          : await generateImage({
+        variantPrompts = Array.from({ length: wantedVariants }, () => basePrompt)
+        notices.push('指示のAI解釈が無効なので、同じ指示のまま seed だけ変えた候補を出します')
+      }
+    } else if (usesImageModel && asksForMultipleCandidates(instruction)) {
+      // 黙って 1 枚だけ出すのが、この機能が無かったころの問題そのものだった
+      notices.push(
+        '複数の候補を頼まれていますが、候補の数が 1 になっています。チャット下の「候補」で数を選ぶと、まとめて出します',
+      )
+    }
+
+    // 枚数ぶんまとめて決める。1 枚ずつ時刻から引くと、同じ送信の中で揃わない
+    const stamp = Date.now()
+    const variants = variantPrompts.map((variantPrompt, index) => ({
+      prompt: variantPrompt,
+      seed: usesImageModel
+        ? Number.isInteger(body.seed) && variantPrompts.length === 1
+          ? body.seed!
+          : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
+            Number.parseInt(sha256(`${variantPrompt}${stamp}${index}`).slice(0, 8), 16) % 2 ** 31
+        : 0,
+    }))
+
+    const entities: ImageEntity[] = []
+    let firstError: unknown
+    for (const { prompt, seed } of variants) {
+      try {
+        entities.push(
+          await serial(async () => {
+            const key = inpaintInput
+              ? inpaintCacheKeyOf(inpaintInput)
+              : standardInput
+                ? standardImageCacheKeyOf(standardInput)
+                : backgroundInput
+                  ? backgroundRemovalCacheKeyOf(backgroundInput)
+                  : cacheKeyOf(
+                      {
+                        prompt,
+                        seed,
+                        ...(conditioningImage
+                          ? {
+                              imageDigest: conditioningImage.digest,
+                              imageStrength: IMAGE_EDIT_STRENGTH,
+                            }
+                          : {}),
+                      },
+                      // キャッシュ鍵はモデルを含む。編集は別コマンド＝別モデルなので取り違えない
+                      modelIdOf(conditioningImage ? resolveImageEditCommand() : resolveImageCommand()),
+                    )
+            const cachedPng = join(CACHE_DIR, `${key}.png`)
+            const cachedMeta = join(CACHE_DIR, `${key}.json`)
+
+            let result: GenerateResult
+            if (existsSync(cachedPng) && existsSync(cachedMeta)) {
+              const meta = JSON.parse(await readFile(cachedMeta, 'utf8'))
+              result = { ...meta, png: new Uint8Array(await readFile(cachedPng)) }
+            } else {
+              result = inpaintInput
+                ? await inpaintImage(inpaintInput)
+                : standardInput
+                  ? await processStandardImage(standardInput)
+                  : backgroundInput
+                    ? await removeBackground(backgroundInput)
+                : await generateImage({
+                    prompt,
+                    seed,
+                    ...(conditioningImage
+                      ? {
+                          imagePath: conditioningImage.path,
+                          imageDigest: conditioningImage.digest,
+                          imageStrength: IMAGE_EDIT_STRENGTH,
+                        }
+                      : {}),
+                  })
+              await writeFile(cachedPng, result.png)
+              await writeFile(
+                cachedMeta,
+                JSON.stringify(
+                  {
+                    model: result.model,
+                    provider: result.provider,
+                    startedAtTime: result.startedAtTime,
+                    endedAtTime: result.endedAtTime,
+                  },
+                  null,
+                  2,
+                ),
+                'utf8',
+              )
+            }
+
+            // 絵の内容だけを数える。PNG のファイル全体だと生成時刻で毎回変わる
+            const digest = imageContentDigest(result.png)
+            const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
+            await writeFile(path, result.png)
+            const dimensions = pngDimensions(result.png)
+
+            const recorded = graph.recordGeneration({
+              image: { digest },
+              label: body.label?.trim() || body.intent || '無題',
+              location: `images/${digest.slice(0, 16)}.png`,
               prompt,
-              seed,
-              ...(conditioningImage
-                ? {
-                    imagePath: conditioningImage.path,
-                    imageDigest: conditioningImage.digest,
-                    imageStrength: IMAGE_EDIT_STRENGTH,
-                  }
-                : {}),
-            })
-        await writeFile(cachedPng, result.png)
-        await writeFile(
-          cachedMeta,
-          JSON.stringify(
-            {
               model: result.model,
               provider: result.provider,
+              seed,
+              ...(usesImageModel ? { steps: 8 } : {}),
+              ...(dimensions ? dimensions : {}),
+              ...(plan.tool === 'image.edit' && source
+                ? { imageStrength: IMAGE_EDIT_STRENGTH }
+                : {}),
+              ...(plan.tool === 'image.edit' && body.maskedImage && conditioningImage
+                ? {
+                    conditioningImageDigest: conditioningImage.digest,
+                    conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
+                  }
+                : {}),
+              // 親ではなく、その奥の版から描き直したときは、実際に使った画像を残す。
+              // これが無いと、記録から同じ絵を作り直せない（D-002）
+              ...(wordmarkBase
+                ? {
+                    conditioningImageDigest: wordmarkBase.digest,
+                    conditioningImageLocation: `images/${wordmarkBase.digest.slice(0, 16)}.png`,
+                  }
+                : {}),
+              ...(useInpainting && maskImage
+                ? {
+                    maskImageDigest: maskImage.digest,
+                    maskImageLocation: `images/${maskImage.digest.slice(0, 16)}.png`,
+                  }
+                : {}),
+              planningMode: planning.mode,
+              ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
+              ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
+              selectedTool: plan.tool,
+              reproducibility: imageToolReproducibility(plan.tool),
+              pixelOrigin: imageToolPixelOrigin(plan.tool),
+              ...(commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)
+                ? { commandTemplate: commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)! }
+                : {}),
+              toolArguments: JSON.stringify(plan.arguments),
               startedAtTime: result.startedAtTime,
               endedAtTime: result.endedAtTime,
-            },
-            null,
-            2,
-          ),
-          'utf8',
+              ...(body.intent?.trim() ? { intent: body.intent } : {}),
+              ...(body.parent ? { derivedFrom: [body.parent] } : {}),
+              ...(body.referenced?.length ? { referenced: body.referenced } : {}),
+              agents: [
+                executorAgent(plan.tool).id,
+                plannerAgent(planning).id,
+                (await personAgent()).id,
+              ],
+            })
+            await persist()
+            return recorded
+          }),
         )
+      } catch (error) {
+        if (firstError === undefined) firstError = error
       }
-
-      // 絵の内容だけを数える。PNG のファイル全体だと生成時刻で毎回変わる
-      const digest = imageContentDigest(result.png)
-      const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
-      await writeFile(path, result.png)
-      const dimensions = pngDimensions(result.png)
-
-      const recorded = graph.recordGeneration({
-        image: { digest },
-        label: body.label?.trim() || body.intent || '無題',
-        location: `images/${digest.slice(0, 16)}.png`,
-        prompt,
-        model: result.model,
-        provider: result.provider,
-        seed,
-        ...(usesImageModel ? { steps: 8 } : {}),
-        ...(dimensions ? dimensions : {}),
-        ...(plan.tool === 'image.edit' && source
-          ? { imageStrength: IMAGE_EDIT_STRENGTH }
-          : {}),
-        ...(plan.tool === 'image.edit' && body.maskedImage && conditioningImage
-          ? {
-              conditioningImageDigest: conditioningImage.digest,
-              conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
-            }
-          : {}),
-        // 親ではなく、その奥の版から描き直したときは、実際に使った画像を残す。
-        // これが無いと、記録から同じ絵を作り直せない（D-002）
-        ...(wordmarkBase
-          ? {
-              conditioningImageDigest: wordmarkBase.digest,
-              conditioningImageLocation: `images/${wordmarkBase.digest.slice(0, 16)}.png`,
-            }
-          : {}),
-        ...(useInpainting && maskImage
-          ? {
-              maskImageDigest: maskImage.digest,
-              maskImageLocation: `images/${maskImage.digest.slice(0, 16)}.png`,
-            }
-          : {}),
-        planningMode: planning.mode,
-        ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
-        ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
-        selectedTool: plan.tool,
-        reproducibility: imageToolReproducibility(plan.tool),
-        pixelOrigin: imageToolPixelOrigin(plan.tool),
-        ...(commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)
-          ? { commandTemplate: commandTemplateOf(plan.tool, conditioningImage !== undefined, RESOLVERS)! }
-          : {}),
-        toolArguments: JSON.stringify(plan.arguments),
-        startedAtTime: result.startedAtTime,
-        endedAtTime: result.endedAtTime,
-        ...(body.intent?.trim() ? { intent: body.intent } : {}),
-        ...(body.parent ? { derivedFrom: [body.parent] } : {}),
-        ...(body.referenced?.length ? { referenced: body.referenced } : {}),
-        agents: [
-          executorAgent(plan.tool).id,
-          plannerAgent(planning).id,
-          (await personAgent()).id,
-        ],
-      })
-      await persist()
-      return recorded
-    })
+    }
+    // 全部落ちたときだけ失敗として返す。1 枚でも出ていれば、出た分は捨てない
+    if (entities.length === 0) throw firstError ?? new Error('生成に失敗しました')
+    if (entities.length < variants.length) {
+      notices.push(`${variants.length} 枚のうち ${entities.length} 枚が出ました`)
+    }
 
     return c.json({
-      entity,
+      entity: entities[0],
+      entities,
       graph: toProvJsonLd(graph),
       routing: {
         mode: planning.mode,
         tool: plan.tool,
         arguments: plan.arguments,
+        variants: entities.length,
         ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
         ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
-        ...(planning.warning ? { warning: planning.warning } : {}),
+        ...(planning.warning || notices.length > 0
+          ? { warning: [planning.warning, ...notices].filter(Boolean).join(' / ') }
+          : {}),
       },
     })
   } catch (error) {
