@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.6](https://github.com/kumagallium/PROVision/compare/v0.2.5...v0.2.6) - 2026-08-26
+
+- fix(prov): 記録しているのに確かめられない項目をなくす by @kumagallium in https://github.com/kumagallium/PROVision/pull/21
+- feat(image): 実測にもとづいて生成の既定を見直す — 1枚あたりの時間を半分にする by @kumagallium in https://github.com/kumagallium/PROVision/pull/22
+
 ## [v0.2.5](https://github.com/kumagallium/PROVision/compare/v0.2.4...v0.2.5) - 2026-08-26
 
 - feat(prov): 指示を節点として置き、候補を1つの会話にまとめる by @kumagallium in https://github.com/kumagallium/PROVision/pull/19
