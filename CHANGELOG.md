@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.7](https://github.com/kumagallium/PROVision/compare/v0.2.6...v0.2.7) - 2026-08-26
+
+- feat(prov): 複数の画像を材料に1枚作れるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/24
+- feat(image): ガンマ補正とスケールバーを足す by @kumagallium in https://github.com/kumagallium/PROVision/pull/26
+
 ## [v0.2.6](https://github.com/kumagallium/PROVision/compare/v0.2.5...v0.2.6) - 2026-08-26
 
 - fix(prov): 記録しているのに確かめられない項目をなくす by @kumagallium in https://github.com/kumagallium/PROVision/pull/21
