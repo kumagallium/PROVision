@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.11](https://github.com/kumagallium/PROVision/compare/v0.2.10...v0.2.11) - 2026-08-26
+
+- fix(image): 作り替えの依頼に「すべて保て」を付けないようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/34
+
 ## [v0.2.10](https://github.com/kumagallium/PROVision/compare/v0.2.9...v0.2.10) - 2026-08-26
 
 - fix(ui): 候補をできた順に出し、生成中は入力を伏せる by @kumagallium in https://github.com/kumagallium/PROVision/pull/32
