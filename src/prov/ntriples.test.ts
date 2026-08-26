@@ -185,6 +185,29 @@ describe('実行環境と再現等級を N-Triples へ出す（D-015 / D-016）'
     expect(text).toMatch(/pixelOrigin>\s+"synthesized"/)
   })
 
+  it('1 回の送信と限定表現を SPARQL から引ける（D-022）', () => {
+    const g = new ProvGraph()
+    const person = g.addAgent('someone', '誰か', 'Person')
+    const plan = g.addPlan('候補を出して', '2026-08-26T10:00:00Z')
+    g.recordGeneration({
+      image: new TextEncoder().encode('nt-plan'),
+      label: '候補',
+      prompt: 'a diagram',
+      model: 'z-image-turbo-4bit',
+      seed: 1,
+      planId: plan.id,
+      startedAtTime: '2026-08-26T10:00:00Z',
+      endedAtTime: '2026-08-26T10:00:12Z',
+      agents: [person.id],
+    })
+    const text = toNTriples(g).join('\n')
+    expect(text).toMatch(/prov#Plan>/)
+    expect(text).toMatch(/prov#qualifiedAssociation>/)
+    expect(text).toMatch(/prov#hadPlan>/)
+    // 責任者は人間 Agent（D-006）
+    expect(text).toMatch(/#association> <http:\/\/www\.w3\.org\/ns\/prov#agent>/)
+  })
+
   it('取り込んだ元ファイルも SPARQL から引ける（D-019）', () => {
     const g = new ProvGraph()
     g.recordGeneration({

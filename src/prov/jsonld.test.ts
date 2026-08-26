@@ -246,6 +246,38 @@ describe('実行環境と再現等級（D-015 / D-016）', () => {
     expect(fromProvJsonLd(doc, DEFAULT_BASE).listActivities()[0]?.reproducibility).toBeUndefined()
   })
 
+  it('1 回の送信（Plan）と限定表現が JSON-LD を往復しても消えない（D-022）', () => {
+    const g = new ProvGraph()
+    const person = g.addAgent('someone', '誰か', 'Person')
+    const plan = g.addPlan('候補を出して', '2026-08-26T10:00:00Z')
+    for (const tag of ['a', 'b']) {
+      g.recordGeneration({
+        image: bytes(`plan-${tag}`),
+        label: `候補 ${tag}`,
+        prompt: `prompt ${tag}`,
+        model: 'z-image-turbo-4bit',
+        seed: tag === 'a' ? 1 : 2,
+        intent: '候補を出して',
+        planId: plan.id,
+        startedAtTime: '2026-08-26T10:00:00Z',
+        endedAtTime: '2026-08-26T10:00:12Z',
+        agents: [person.id],
+      })
+    }
+    const doc = toProvJsonLd(g)
+    // prov:hadPlan は Association の述語。素の PROV で言うには限定表現を通すしかない
+    const association = doc['@graph'].find((n: JsonLdNode) => n['@type'] === 'Association')
+    expect(association).toBeDefined()
+    expect(doc['@graph'].some((n: JsonLdNode) => n['@type'] === 'Plan')).toBe(true)
+
+    const back = fromProvJsonLd(doc, DEFAULT_BASE)
+    expect(back.listPlans()).toHaveLength(1)
+    expect(back.listPlans()[0]?.label).toBe('候補を出して')
+    expect(back.listActivities().every((a) => a.planId === plan.id)).toBe(true)
+    // 会話がひとつに畳まれることまで往復する
+    expect(back.roots()).toHaveLength(1)
+  })
+
   it('取り込みの記録が JSON-LD を往復しても消えない（D-019）', () => {
     const g = new ProvGraph()
     g.recordGeneration({

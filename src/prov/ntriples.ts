@@ -43,6 +43,17 @@ export function toNTriples(graph: ProvGraph): string[] {
     if (agent.platform) triple(s, iri(`${PROVISION}platform`), literal(agent.platform))
   }
 
+  // 1 回の送信（D-022）。prov:Plan は prov:Entity の下位
+  for (const plan of graph.listPlans()) {
+    const s = iri(plan.id)
+    triple(s, iri(`${RDF}type`), iri(`${PROV}Plan`))
+    triple(s, iri(`${RDF}type`), iri(`${PROV}Entity`))
+    triple(s, iri(`${RDFS}label`), literal(plan.label))
+    if (plan.startedAtTime) {
+      triple(s, iri(`${PROV}generatedAtTime`), literal(plan.startedAtTime, `${XSD}dateTime`))
+    }
+  }
+
   for (const e of graph.listEntities()) {
     const s = iri(e.id)
     triple(s, iri(`${RDF}type`), iri(`${PROV}Entity`))
@@ -129,6 +140,18 @@ export function toNTriples(graph: ProvGraph): string[] {
     }
     for (const agent of a.wasAssociatedWith) {
       triple(s, iri(`${PROV}wasAssociatedWith`), iri(agent))
+    }
+    // どの送信から走ったか（D-022）。prov:hadPlan は Association の述語なので限定表現を通す
+    if (a.planId) {
+      const association = iri(`${a.id}#association`)
+      triple(s, iri(`${PROV}qualifiedAssociation`), association)
+      triple(association, iri(`${RDF}type`), iri(`${PROV}Association`))
+      triple(association, iri(`${PROV}hadPlan`), iri(a.planId))
+      // 責任者は人間 Agent（D-006）。取れないときは書かない
+      const person = a.wasAssociatedWith.find(
+        (id) => graph.listAgents().find((agent) => agent.id === id)?.kind === 'Person',
+      )
+      if (person) triple(association, iri(`${PROV}agent`), iri(person))
     }
     triple(iri(a.generated), iri(`${PROV}wasGeneratedBy`), iri(a.id))
   }

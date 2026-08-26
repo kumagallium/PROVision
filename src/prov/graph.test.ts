@@ -195,3 +195,60 @@ describe('ProvGraph', () => {
     expect(children).toEqual([left.id, right.id].sort())
   })
 })
+
+describe('1 回の送信を節点として置く（D-022）', () => {
+  /** 親が無いまま候補を 3 つ出した状態 */
+  function threeCandidates() {
+    const g = new ProvGraph()
+    const plan = g.addPlan('星座のロゴを作って', '2026-08-26T10:00:00Z')
+    const made = ['a', 'b', 'c'].map((tag, i) =>
+      g.recordGeneration(
+        base({
+          image: bytes(`candidate-${tag}`),
+          label: `候補 ${tag}`,
+          intent: '星座のロゴを作って',
+          seed: 100 + i,
+          planId: plan.id,
+          startedAtTime: `2026-08-26T10:00:0${i}Z`,
+          endedAtTime: `2026-08-26T10:01:0${i}Z`,
+        }),
+      ),
+    )
+    return { g, plan, made }
+  }
+
+  it('親が無い候補でも、会話は 1 つになる', () => {
+    const { g, made } = threeCandidates()
+    // ここが D-022 の目的。指示を置かないと根が 3 つ＝会話が 3 つ生まれる
+    expect(g.roots()).toHaveLength(1)
+    expect(g.roots()[0]?.id).toBe(made[0]!.id)
+    for (const entity of made) expect(g.rootOf(entity.id)).toBe(made[0]!.id)
+    expect(g.session(made[0]!.id).map((e) => e.id).sort()).toEqual(
+      made.map((e) => e.id).sort(),
+    )
+  })
+
+  it('その送信から走った Activity を引ける', () => {
+    const { g, plan } = threeCandidates()
+    expect(g.activitiesOfPlan(plan.id)).toHaveLength(3)
+    // 生まれた順。画面で候補を並べる順でもある
+    expect(g.activitiesOfPlan(plan.id).map((a) => a.seed)).toEqual([100, 101, 102])
+  })
+
+  it('同じ指示・同じ時刻なら同じ Plan に収束する', () => {
+    const g = new ProvGraph()
+    const first = g.addPlan('同じ指示', '2026-08-26T10:00:00Z')
+    const again = g.addPlan('同じ指示', '2026-08-26T10:00:00Z')
+    expect(again.id).toBe(first.id)
+    expect(g.listPlans()).toHaveLength(1)
+    // 時刻が違えば別の送信
+    expect(g.addPlan('同じ指示', '2026-08-26T11:00:00Z').id).not.toBe(first.id)
+  })
+
+  it('送信を置かない版は、これまでどおり 1 版 1 会話', () => {
+    const g = new ProvGraph()
+    const one = g.recordGeneration(base({ image: bytes('single-1') }))
+    const two = g.recordGeneration(base({ image: bytes('single-2'), seed: 9 }))
+    expect(g.roots().map((e) => e.id).sort()).toEqual([one.id, two.id].sort())
+  })
+})

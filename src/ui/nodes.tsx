@@ -84,6 +84,29 @@ export function ActivityNode({ data, selected }: NodeProps) {
   )
 }
 
+/**
+ * 1 回の送信（`prov:Plan`）。**候補が枝分かれする起点**（D-022）。
+ * ここから何本走ったかを出す——2 本以上でなければ、この節点は作られない
+ */
+export function PlanNode({ data, selected }: NodeProps) {
+  const d = data as FlowNodeData
+  const c = PALETTE.plan
+  return (
+    <div style={{ ...card(c.main, c.bg, selected === true), width: 220 }} title={d.label}>
+      <div style={{ padding: '5px 10px 0', color: c.text, fontSize: 10, fontWeight: 700 }}>
+        指示
+      </div>
+      <div style={title(c.text, 3)}>{d.label}</div>
+      {d.branches ? (
+        <div style={{ padding: '0 10px 8px', color: '#5c6b73', fontSize: 11 }}>
+          ここから {d.branches} 本
+        </div>
+      ) : null}
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  )
+}
+
 /** 人間が参照した外部リソース。こちらの持ち物ではないので、IRI しか言わない */
 export function ExternalNode({ data, selected }: NodeProps) {
   const d = data as FlowNodeData
@@ -105,4 +128,5 @@ export const nodeTypes = {
   image: ImageNode,
   activity: ActivityNode,
   external: ExternalNode,
+  plan: PlanNode,
 }

@@ -17,6 +17,11 @@ export function activityIri(base: string, key: string): string {
   return `${base}/activity/${sha256(key).slice(0, 32)}`
 }
 
+/** 1 回の送信（`prov:Plan`）。指示そのものと出した時刻から決める */
+export function planIri(base: string, key: string): string {
+  return `${base}/plan/${sha256(key).slice(0, 32)}`
+}
+
 export function agentIri(base: string, slug: string): string {
   return `${base}/agent/${slug}`
 }

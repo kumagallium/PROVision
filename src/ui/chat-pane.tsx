@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
+import type { ImageEntity } from '../prov/types.js'
 import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { imageUrlOf } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
@@ -120,14 +121,31 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         {chain.map((a) => {
           const entity = graph?.getEntity(a.generated)
           /**
-           * その版の親から生えたものを全部並べる。**候補は兄弟として記録される**ので
-           * （D-018）、別の状態を持たなくてもグラフから導ける。後から生やした枝も
-           * 同じ列に出る——どちらも「この版から生えたもの」で、区別する記録が無い
+           * 候補を横に並べる。**別の状態は持たず、グラフから導く。**
+           *
+           * 親があるときは、その親から生えたものを全部（D-018）。後から生やした枝も
+           * 同じ列に出る——どちらも「この版から生えたもの」で、区別する記録が無い。
+           *
+           * 親が無いときは兄弟になりようがないので、**同じ指示から走ったもの**を辿る
+           * （D-022）。親画像は無くても、指示は共通の起点として記録されている
            */
           const parent = a.used[0]
-          const siblings = parent ? (graph?.children(parent) ?? []) : []
+          const siblings = parent
+            ? (graph?.children(parent) ?? [])
+            : a.planId
+              ? (graph?.activitiesOfPlan(a.planId) ?? [])
+                  .map((act) => graph?.getEntity(act.generated))
+                  .filter((e): e is ImageEntity => e !== undefined)
+              : []
           const shown = siblings.length > 1 ? siblings : entity ? [entity] : []
           const thumbWidth = shown.length > 1 ? 104 : 220
+          /**
+           * 候補どうしで**実際に何が違うのか**を出す。intent は揃っていて、違うのは
+           * seed と実行された全文（D-018）。全部同じ文なら seed 違いなので、文は出さない
+           */
+          const promptOf = (id: string) => graph?.activityThatGenerated(id)?.prompt ?? ''
+          const promptsDiffer =
+            shown.length > 1 && new Set(shown.map((e) => promptOf(e.id))).size > 1
           return (
             <div key={a.id} style={{ marginBottom: 16 }}>
               <div
@@ -145,36 +163,61 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
               </div>
               {shown.length > 1 ? (
                 <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 6 }}>
-                  この版から生えた {shown.length} 件
+                  {parent ? 'この版から生えた' : 'この指示から出た'} {shown.length} 件
                 </div>
               ) : null}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {shown.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    onClick={() => onSelect(candidate.id)}
-                    title={candidate.label}
-                    style={{
-                      display: 'block',
-                      padding: 0,
-                      border:
-                        candidate.id === current
-                          ? `2px solid ${PALETTE.image.main}`
-                          : '1px solid #e0e5e8',
-                      borderRadius: 10,
-                      overflow: 'hidden',
-                      cursor: 'pointer',
-                      background: 'none',
-                    }}
-                  >
-                    <ProvImage
-                      path={imageUrlOf(candidate)}
-                      alt={candidate.label}
-                      style={{ display: 'block', width: thumbWidth }}
-                    />
-                  </button>
-                ))}
+                {shown.map((candidate) => {
+                  const act = graph?.activityThatGenerated(candidate.id)
+                  return (
+                    <div key={candidate.id} style={{ width: thumbWidth }}>
+                      <button
+                        type="button"
+                        onClick={() => onSelect(candidate.id)}
+                        title={candidate.label}
+                        style={{
+                          display: 'block',
+                          padding: 0,
+                          width: '100%',
+                          border:
+                            candidate.id === current
+                              ? `2px solid ${PALETTE.image.main}`
+                              : '1px solid #e0e5e8',
+                          borderRadius: 10,
+                          overflow: 'hidden',
+                          cursor: 'pointer',
+                          background: 'none',
+                        }}
+                      >
+                        <ProvImage
+                          path={imageUrlOf(candidate)}
+                          alt={candidate.label}
+                          style={{ display: 'block', width: '100%' }}
+                        />
+                      </button>
+                      {shown.length > 1 && act ? (
+                        <div style={{ fontSize: 10, color: '#8b98a1', padding: '3px 1px 0' }}>
+                          seed {act.seed}
+                          {promptsDiffer ? (
+                            <div
+                              title={act.prompt}
+                              style={{
+                                marginTop: 2,
+                                color: '#5c6b73',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 3,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {act.prompt}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
                 seed {a.seed} · {a.model}
