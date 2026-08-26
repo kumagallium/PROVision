@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.2](https://github.com/kumagallium/PROVision/compare/v0.2.1...v0.2.2) - 2026-08-26
+
+- feat(prov): 版が食い違ったとき、どこが違うか出せるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/10
+- feat(prov): 画素を作ったかどうかを、再現の等級と別の軸で記録する by @kumagallium in https://github.com/kumagallium/PROVision/pull/12
+
 ## [v0.2.1](https://github.com/kumagallium/PROVision/compare/v0.2.0...v0.2.1) - 2026-08-25
 
 - fix(image): 背景にむらがある画像で余白が削れないのを直す by @kumagallium in https://github.com/kumagallium/PROVision/pull/8
