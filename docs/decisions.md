@@ -555,10 +555,10 @@ Activity へ載せる。
 | 値 | 意味 | ツール |
 |---|---|---|
 | `geometric` | 位置と補間だけ。内容の追加も除去もない | `image.trim` / `image.crop-square` / `image.rotate` / `image.resize` |
-| `photometric` | 画素値を変えるが、**画像全体に同じ規則で**。局所的に差をつけない | 未実装（明るさ・コントラスト・ガンマ） |
-| `annotated` | 元の画素を残したまま、確定的な描画を重ねる・余白を足す | `image.wordmark` |
+| `photometric` | 画素値を変えるが、**画像全体に同じ規則で**。局所的に差をつけない | `image.brightness` / `image.contrast` / `image.gamma` |
+| `annotated` | 元の画素を残したまま、確定的な描画を重ねる・余白を足す | `image.wordmark` / `image.scalebar` |
 | `removed` | 画素を消す（透明にする）だけ。足さない | `background.remove` |
-| `synthesized` | **入力に無かった内容を作った** | `image.generate` / `image.edit` / `image.erase` |
+| `synthesized` | **入力に無かった内容を作った** | `image.generate` / `image.edit` / `image.erase` / `image.compose` |
 | `external` | **この画素が何を経てきたかは、この記録の外にある** | `image.import`（D-019） |
 
 **なぜ等級と分けるのか**（この決定の本体）
