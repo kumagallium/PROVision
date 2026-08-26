@@ -21,6 +21,69 @@ async function sourceImage(): Promise<{ path: string; digest: string }> {
   return { path, digest: sha256(new Uint8Array(await readFile(path))) }
 }
 
+describe('画像全体の明暗（D-020 の photometric）', () => {
+  /** 出力 PNG の左上の R 値。全体に同じ規則をかけているかを見る */
+  async function firstRed(png: Uint8Array): Promise<number> {
+    const image = await Jimp.read(Buffer.from(png))
+    return (image.getPixelColor(0, 0) >>> 24) & 255
+  }
+
+  it('明るさは amount=0 で無変換、正で明るく、負で暗くなる', async () => {
+    const source = await sourceImage()
+    const base = 0x33 // sourceImage の R
+    const at = async (amount: number) =>
+      firstRed(
+        (
+          await processStandardImage({
+            tool: 'image.brightness',
+            arguments: { amount },
+            imagePath: source.path,
+            imageDigest: source.digest,
+          })
+        ).png,
+      )
+    expect(await at(0)).toBe(base)
+    expect(await at(100)).toBeGreaterThan(base)
+    expect(await at(-50)).toBeLessThan(base)
+  })
+
+  it('コントラストは amount=0 で無変換', async () => {
+    const source = await sourceImage()
+    const result = await processStandardImage({
+      tool: 'image.contrast',
+      arguments: { amount: 0 },
+      imagePath: source.path,
+      imageDigest: source.digest,
+    })
+    expect(await firstRed(result.png)).toBe(0x33)
+  })
+
+  it('全体に同じ規則をかける。局所的に差をつけない', async () => {
+    // 半分だけ明るい画像を作り、差が保たれる（＝一様な写像である）ことを見る
+    const dir = await mkdtemp(join(tmpdir(), 'provision-photometric-test-'))
+    dirs.push(dir)
+    const path = join(dir, 'halves.png')
+    const image = new Jimp({ width: 20, height: 4, color: 0x404040ff })
+    for (let y = 0; y < 4; y++) {
+      for (let x = 10; x < 20; x++) image.setPixelColor(0x808080ff, x, y)
+    }
+    await writeFile(path, await image.getBuffer('image/png'))
+    const digest = sha256(new Uint8Array(await readFile(path)))
+    const result = await processStandardImage({
+      tool: 'image.brightness',
+      arguments: { amount: 50 },
+      imagePath: path,
+      imageDigest: digest,
+    })
+    const out = await Jimp.read(Buffer.from(result.png))
+    const left = (out.getPixelColor(0, 0) >>> 24) & 255
+    const right = (out.getPixelColor(15, 0) >>> 24) & 255
+    // 0x40 と 0x80 に同じ倍率 1.5 がかかる
+    expect(left).toBe(0x60)
+    expect(right).toBe(0xc0)
+  })
+})
+
 describe('標準画像処理', () => {
   it('背景にむらがあっても余白を削る', async () => {
     // 生成画像の背景はグラデーションとノイズを持つ。判定が厳しすぎると端で止まり、
