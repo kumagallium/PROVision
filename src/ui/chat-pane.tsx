@@ -10,6 +10,8 @@
  */
 import { useEffect, useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
+import { fromProvJsonLd } from '../prov/jsonld.js'
+import { DEFAULT_BASE } from '../prov/iri.js'
 import type { ImageEntity } from '../prov/types.js'
 import type { ProvJsonLdDocument } from '../prov/jsonld.js'
 import { imageUrlOf } from './graph-adapter.js'
@@ -29,9 +31,11 @@ interface Props {
   current: string | null
   onGraph: (doc: ProvJsonLdDocument) => void
   onSelect: (id: string) => void
+  /** 生成の進み具合。会話を選んでいないときは真ん中の面がこれを出す */
+  onProgress?: (progress: { done: number; total: number } | null) => void
 }
 
-export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
+export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,14 +49,26 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   /** 画面で引いた矢印（D-020）。位置は画像の大きさに対する％ */
   const [arrow, setArrow] = useState<ArrowSelection | null>(null)
   const [arrowOpen, setArrowOpen] = useState(false)
+  /**
+   * 送信を始めた時点で在った版。**これに無いものが、この送信で生まれた版**である。
+   * 生成は直列なので、待っている間にグラフは 1 枚ずつ増える
+   */
+  const [bornBefore, setBornBefore] = useState<ReadonlySet<string>>(new Set())
   const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
+  /** この送信で生まれた版。**まとめて返るのを待たずに 1 枚ずつ出す** */
+  const born =
+    busy && graph ? graph.listEntities().filter((entity) => !bornBefore.has(entity.id)) : []
   const chain = graph && current ? graph.lineage(current) : []
   const children = graph && current ? graph.children(current) : []
   /** いま居る版に子がある = ここへ送ると枝が生える */
   const willBranch = children.length > 0
   const currentEntity = graph && current ? graph.getEntity(current) : undefined
   const currentImageUrl = currentEntity ? imageUrlOf(currentEntity) : undefined
+
+  useEffect(() => {
+    onProgress?.(busy ? { done: born.length, total: variants } : null)
+  }, [busy, born.length, variants, onProgress])
 
   useEffect(() => {
     setEditRegion(null)
@@ -68,9 +84,33 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   async function send() {
     const intent = text.trim()
     if (!intent || busy) return
+    /**
+     * **送信の直前にサーバから取り直す。** 画面のグラフが古いと、前の版まで
+     * 「この送信で生まれた」と数えてしまい、進み具合が嘘になる
+     */
+    const before = await apiFetch('api/graph')
+      .then((r) => (r.ok ? (r.json() as Promise<ProvJsonLdDocument>) : null))
+      .then((doc) => (doc ? fromProvJsonLd(doc, DEFAULT_BASE) : null))
+      .catch(() => null)
+    setBornBefore(
+      new Set((before ?? graph)?.listEntities().map((entity) => entity.id) ?? []),
+    )
     setBusy(true)
     setError(null)
     setRoutingNotice(null)
+    /**
+     * 1 枚できるたびに画面へ出す。サーバは 1 枚ずつ記録して保存するので、
+     * 待っている間にグラフを取り直せば途中経過が見える。
+     * まとめて返るのを待つと、4 枚で 10 分近く何も出ない
+     */
+    const poll = window.setInterval(() => {
+      void apiFetch('api/graph')
+        .then((r) => (r.ok ? (r.json() as Promise<ProvJsonLdDocument>) : null))
+        .then((doc) => {
+          if (doc) onGraph(doc)
+        })
+        .catch(() => undefined)
+    }, 2500)
     try {
       const res = await apiFetch('api/generate', {
         method: 'POST',
@@ -115,7 +155,9 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
+      window.clearInterval(poll)
       setBusy(false)
+      setBornBefore(new Set())
     }
   }
 
@@ -257,8 +299,27 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         ) : null}
 
         {busy ? (
-          <div style={{ fontSize: 12, color: '#5b8fb9' }}>
-            生成中… 1 枚 1〜2 分かかります（直列に 1 本ずつ流しています）
+          <div style={{ marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: '#5b8fb9' }}>
+              生成中… {born.length}/{variants} 枚（1 枚 1〜2 分。直列に 1 本ずつ流しています）
+            </div>
+            {born.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {born.map((entity) => (
+                  <ProvImage
+                    key={entity.id}
+                    path={imageUrlOf(entity)}
+                    alt={entity.label}
+                    style={{
+                      display: 'block',
+                      width: born.length > 1 ? 104 : 220,
+                      borderRadius: 10,
+                      border: '1px solid #e0e5e8',
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
         {routingNotice ? (
@@ -279,6 +340,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <button
               type="button"
+              disabled={busy}
               onClick={() => setEditRegionOpen(true)}
               style={{ padding: '5px 8px', fontSize: 11 }}
             >
@@ -298,6 +360,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             </span>
             <button
               type="button"
+              disabled={busy}
               onClick={() => setPickerOpen(true)}
               style={{ padding: '5px 8px', fontSize: 11 }}
             >
@@ -305,6 +368,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             </button>
             <button
               type="button"
+              disabled={busy}
               onClick={() => setArrowOpen(true)}
               style={{ padding: '5px 8px', fontSize: 11 }}
             >
@@ -370,6 +434,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             候補
             <select
               value={variants}
+              disabled={busy}
               onChange={(e) => setVariants(Number(e.target.value))}
               style={{ font: 'inherit', fontSize: 11, padding: '2px 4px' }}
             >
@@ -388,11 +453,19 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         </div>
         <textarea
           value={text}
+          // 生成は直列に 1 本ずつ流す。送れないのに書けると、送ったつもりになる
+          disabled={busy}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void send()
           }}
-          placeholder={current ? 'この版への指示（⌘Enter で送信）' : '最初の指示（⌘Enter で送信）'}
+          placeholder={
+            busy
+              ? '生成が終わるまで待ってください'
+              : current
+                ? 'この版への指示（⌘Enter で送信）'
+                : '最初の指示（⌘Enter で送信）'
+          }
           rows={3}
           style={{
             width: '100%',
@@ -403,6 +476,8 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             padding: 8,
             font: 'inherit',
             fontSize: 13,
+            background: busy ? '#f4f6f7' : '#fff',
+            color: busy ? '#8b98a1' : 'inherit',
           }}
         />
         <button
