@@ -20,6 +20,8 @@ import { ProvImage } from './prov-image.js'
 import { apiFetch } from './api-base.js'
 import { EditRegionDialog } from './edit-region-dialog.js'
 import { SourcePicker } from './source-picker.js'
+import { ArrowDialog } from './arrow-dialog.js'
+import type { ArrowSelection } from './arrow-dialog.js'
 import type { EditRegionSelection } from './edit-region-dialog.js'
 
 interface Props {
@@ -40,6 +42,9 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
   /** 材料として足した別の画像（D-021）。いま居る版と合わせて融合する */
   const [extraParents, setExtraParents] = useState<string[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
+  /** 画面で引いた矢印（D-020）。位置は画像の大きさに対する％ */
+  const [arrow, setArrow] = useState<ArrowSelection | null>(null)
+  const [arrowOpen, setArrowOpen] = useState(false)
   const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
   const chain = graph && current ? graph.lineage(current) : []
@@ -55,6 +60,9 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
     // 版を移ったら材料も外す。前の版のつもりで足したものが黙って付いてくるのを防ぐ
     setExtraParents([])
     setPickerOpen(false)
+    // 別の版へ引いた矢印が黙って付いてこないようにする
+    setArrow(null)
+    setArrowOpen(false)
   }, [current])
 
   async function send() {
@@ -72,6 +80,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
           ...(current ? { parent: current } : {}),
           ...(variants > 1 ? { variants } : {}),
           ...(extraParents.length > 0 ? { extraParents } : {}),
+          ...(arrow ? { arrow } : {}),
           ...(editRegion
             ? {
                 maskedImage: editRegion.maskedImage,
@@ -101,6 +110,7 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
       }
       setEditRegion(null)
       setExtraParents([])
+      setArrow(null)
       setText('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
@@ -293,6 +303,22 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
             >
               材料を足す
             </button>
+            <button
+              type="button"
+              onClick={() => setArrowOpen(true)}
+              style={{ padding: '5px 8px', fontSize: 11 }}
+            >
+              {arrow ? '矢印を引き直す' : '矢印を引く'}
+            </button>
+            {arrow ? (
+              <button
+                type="button"
+                onClick={() => setArrow(null)}
+                style={{ padding: '5px 8px', fontSize: 11 }}
+              >
+                矢印を消す
+              </button>
+            ) : null}
             {extraParents.length > 0 ? (
               <button
                 type="button"
@@ -302,6 +328,12 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
                 材料を外す（{extraParents.length}）
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {arrow ? (
+          <div style={{ fontSize: 11, color: PALETTE.image.text, marginBottom: 8 }}>
+            矢印: ({arrow.x1}%, {arrow.y1}%) → ({arrow.x2}%, {arrow.y2}%)
+            {arrow.text ? `「${arrow.text}」` : ''}
           </div>
         ) : null}
         {extraParents.length > 0 ? (
@@ -393,6 +425,16 @@ export function ChatPane({ graph, current, onGraph, onSelect }: Props) {
         </button>
       </div>
       </section>
+      {arrowOpen && currentImageUrl ? (
+        <ArrowDialog
+          imageUrl={currentImageUrl}
+          onCancel={() => setArrowOpen(false)}
+          onConfirm={(selection) => {
+            setArrow(selection)
+            setArrowOpen(false)
+          }}
+        />
+      ) : null}
       {pickerOpen && graph ? (
         <SourcePicker
           graph={graph}

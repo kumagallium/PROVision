@@ -24,6 +24,7 @@ export type ImageToolName =
   | 'image.contrast'
   | 'image.gamma'
   | 'image.scalebar'
+  | 'image.arrow'
   | 'background.remove'
   | 'image.import'
 
@@ -35,6 +36,10 @@ export type ImageToolArgumentName =
   | 'padding'
   | 'text'
   | 'amount'
+  | 'x1'
+  | 'y1'
+  | 'x2'
+  | 'y2'
 
 /** 誰が実行するか。振り分けはこの値だけを見る */
 export type ImageToolExecutor = 'image-model' | 'jimp' | 'inpaint' | 'background' | 'import'
@@ -289,6 +294,17 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
     examples: [{ intent: '「10 um」のスケールバーを幅120pxで入れて' }],
   },
   {
+    name: 'image.arrow',
+    executor: 'jimp',
+    pixelOrigin: 'annotated',
+    purpose:
+      'draw an arrow over the image. The four coordinates are percentages of the image size (0-100): arguments.x1/y1 is the tail and arguments.x2/y2 is the head. arguments.text is an optional label placed at the tail',
+    avoidWhen: 'the user has not shown where the arrow goes — the coordinates come from the on-image drag, not from a guess',
+    requiresSourceImage: true,
+    requiredArguments: ['x1', 'y1', 'x2', 'y2'],
+    accepts: ['x1', 'y1', 'x2', 'y2', 'text'],
+  },
+  {
     name: 'background.remove',
     executor: 'background',
     pixelOrigin: 'removed',
@@ -317,6 +333,10 @@ export const ARGUMENT_LABELS: Record<ImageToolArgumentName, string> = {
   padding: '余白（padding）',
   text: '描く文字列（text）',
   amount: '変化量（amount、％）',
+  x1: '始点の横位置（x1、％）',
+  y1: '始点の縦位置（y1、％）',
+  x2: '終点の横位置（x2、％）',
+  y2: '終点の縦位置（y2、％）',
 }
 
 const BY_NAME = new Map<ImageToolName, ImageToolDefinition>(

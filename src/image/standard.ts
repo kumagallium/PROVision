@@ -26,6 +26,7 @@ export type StandardImageTool = Extract<
   | 'image.contrast'
   | 'image.gamma'
   | 'image.scalebar'
+  | 'image.arrow'
 >
 
 /** 帯の高さは文字高に対する比。シンボルと文字が窮屈にならない値（試作で決めた） */
@@ -39,6 +40,49 @@ const WORDMARK_FONTS = {
   white: [SANS_128_WHITE, SANS_64_WHITE, SANS_32_WHITE, SANS_16_WHITE],
   black: [SANS_128_BLACK, SANS_64_BLACK, SANS_32_BLACK, SANS_16_BLACK],
 } as const
+
+/** 線を 1 本引く。Jimp に線を引く道具が無いので、太さぶんの正方形の筆で塗る */
+function strokeLine(
+  image: Awaited<ReturnType<typeof Jimp.read>>,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  thickness: number,
+  color: number,
+): void {
+  const { width, height } = image.bitmap
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y), 1)
+  const half = Math.floor(thickness / 2)
+  for (let step = 0; step <= steps; step += 1) {
+    const cx = Math.round(from.x + ((to.x - from.x) * step) / steps)
+    const cy = Math.round(from.y + ((to.y - from.y) * step) / steps)
+    for (let dy = -half; dy <= half; dy += 1) {
+      for (let dx = -half; dx <= half; dx += 1) {
+        const x = cx + dx
+        const y = cy + dy
+        if (x < 0 || y < 0 || x >= width || y >= height) continue
+        image.setPixelColor(color, x, y)
+      }
+    }
+  }
+}
+
+/** その辺りの地が暗いか。重ねる色を決めるのに使う */
+function isDarkAt(
+  image: Awaited<ReturnType<typeof Jimp.read>>,
+  x: number,
+  y: number,
+): boolean {
+  const { width, height } = image.bitmap
+  const sample = image.getPixelColor(
+    Math.min(Math.max(x, 0), width - 1),
+    Math.min(Math.max(y, 0), height - 1),
+  )
+  const luminance =
+    0.299 * ((sample >>> 24) & 255) +
+    0.587 * ((sample >>> 16) & 255) +
+    0.114 * ((sample >>> 8) & 255)
+  return luminance < 140
+}
 
 /** 画像の四隅から背景色を決める。継ぎ足す帯を地の色に合わせるため */
 function estimateBackground(image: Awaited<ReturnType<typeof Jimp.read>>): number {
@@ -232,6 +276,57 @@ export async function processStandardImage(input: StandardImageInput): Promise<G
       y: Math.max(0, barY - textHeight - Math.round(thickness / 2)),
       text: label,
     })
+  } else if (input.tool === 'image.arrow') {
+    const { x1, y1, x2, y2 } = input.arguments
+    if (x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+      throw new Error('image.arrowには始点と終点（％）が必要です')
+    }
+    /**
+     * 矢印。**位置は画像の大きさに対する％**で受け取る。画素で受け取ると、
+     * 後からリサイズしたときに指す所がずれる。
+     *
+     * 元の画素は書き換えず、上に重ねるだけ（`pixelOrigin` は `annotated`）。
+     * どこを指すかは利用者にしか分からないので、こちらでは推測しない（D-020）
+     */
+    const at = (px: number, py: number) => ({
+      x: Math.round((px / 100) * (width - 1)),
+      y: Math.round((py / 100) * (height - 1)),
+    })
+    const tail = at(x1, y1)
+    const head = at(x2, y2)
+    const thickness = Math.max(2, Math.round(Math.min(width, height) * 0.006))
+    const dark = isDarkAt(image, head.x, head.y)
+    const ink = dark ? 0xffffffff : 0x000000ff
+    strokeLine(image, tail, head, thickness, ink)
+
+    // 矢じり。終点から後ろへ 2 本
+    const angle = Math.atan2(head.y - tail.y, head.x - tail.x)
+    const barb = Math.max(8, Math.round(Math.min(width, height) * 0.05))
+    for (const spread of [(Math.PI * 5) / 6, (-Math.PI * 5) / 6]) {
+      strokeLine(
+        image,
+        head,
+        {
+          x: Math.round(head.x + barb * Math.cos(angle + spread)),
+          y: Math.round(head.y + barb * Math.sin(angle + spread)),
+        },
+        thickness,
+        ink,
+      )
+    }
+
+    const label = input.arguments.text?.trim()
+    if (label) {
+      const font = await loadFont(dark ? SANS_16_WHITE : SANS_16_BLACK)
+      const textHeight = measureTextHeight(font, label, width)
+      // 文字は始点の側へ置く。終点に置くと、指している物に重なる
+      image.print({
+        font,
+        x: Math.min(Math.max(tail.x + thickness * 2, 0), Math.max(0, width - 8)),
+        y: Math.min(Math.max(tail.y - textHeight, 0), Math.max(0, height - textHeight)),
+        text: label,
+      })
+    }
   } else if (input.tool === 'image.rotate') {
     image.rotate(input.arguments.angle!)
   } else if (input.tool === 'image.resize') {

@@ -68,6 +68,8 @@ describe('画像ツールの定義', () => {
         args[name] = name === 'angle' ? 90 : name === 'text' ? 'asterism' : 24
       }
       if (tool.name === 'image.resize') args.width = 600
+      // 矢印は始点と終点が同じだと描けない。最小の計画にも向きが要る
+      if (tool.name === 'image.arrow') Object.assign(args, { x2: 80, y2: 80 })
       const plan = validateImagePlan({ tool: tool.name, arguments: args }, context)
       expect(plan.tool).toBe(tool.name)
     }

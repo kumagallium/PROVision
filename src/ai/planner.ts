@@ -23,6 +23,11 @@ export interface ImageToolArguments {
   padding?: number
   /** 画像全体にかける変化量（％）。**0 が無変換**。image.brightness / image.contrast */
   amount?: number
+  /** 矢印の位置。**画像の大きさに対する％**なので、寸法が変わっても同じ所を指す */
+  x1?: number
+  y1?: number
+  x2?: number
+  y2?: number
   /** 描画する文字列。image.generate / image.edit だけが受け取れる */
   text?: string
 }
@@ -61,6 +66,11 @@ export interface PlanningContext {
   hasEditRegion: boolean
   /** 材料として別の画像を足したか（D-021）。足したなら融合しかない */
   hasExtraSources?: boolean
+  /**
+   * 画面で引いた矢印（D-020）。**位置は画像の大きさに対する％**。
+   * 引数そのものなので、有無ではなく値ごと渡す——どこを指すかは推測できない
+   */
+  arrow?: { x1: number; y1: number; x2: number; y2: number; text?: string }
   /**
    * 画素を作る操作（`pixelOrigin: 'synthesized'`）を禁じるか（D-020）。
    * **実行してからではなく、計画の段階で拒む**——実行時に止めると、
@@ -136,6 +146,11 @@ export function validateImagePlan(
   const height = taken('height', boundedInteger(sourceArgs.height, 1, 8192))
   const padding = taken('padding', boundedInteger(sourceArgs.padding, 0, 1024))
   const amount = taken('amount', boundedInteger(sourceArgs.amount, -100, 300))
+  // 矢印の位置は画像の大きさに対する％。寸法に依らないので、後から縮めても指す所が変わらない
+  const x1 = taken('x1', boundedInteger(sourceArgs.x1, 0, 100))
+  const y1 = taken('y1', boundedInteger(sourceArgs.y1, 0, 100))
+  const x2 = taken('x2', boundedInteger(sourceArgs.x2, 0, 100))
+  const y2 = taken('y2', boundedInteger(sourceArgs.y2, 0, 100))
   const rawText = typeof sourceArgs.text === 'string' ? sourceArgs.text.trim() : undefined
   // 作り直しでは、描く文字列を来歴から補う。画素を見られないLLMは落としがち
   const inherited =
@@ -153,6 +168,10 @@ export function validateImagePlan(
     padding,
     text,
     amount,
+    x1,
+    y1,
+    x2,
+    y2,
   }
   for (const name of spec.requiredArguments ?? []) {
     if (present[name] === undefined) {
@@ -168,6 +187,9 @@ export function validateImagePlan(
   // コントラストは -100〜100。明るさだけ 300% まで上げられる
   if (tool === 'image.contrast' && (amount === undefined || amount < -100 || amount > 100)) {
     throw new Error('image.contrastのamountは-100から100の整数です')
+  }
+  if (tool === 'image.arrow' && x1 === x2 && y1 === y2) {
+    throw new Error('image.arrowは始点と終点が同じでは描けません')
   }
   // 画像モデルを使わないツールに書き直し文が付いてくることがある。使い道がないだけで
   // 害はないので、弾かずに落とす（弾くと計画ごと捨てて生成側へ落ち、別物が描かれる）
@@ -193,6 +215,10 @@ export function validateImagePlan(
       ...(padding !== undefined ? { padding } : {}),
       ...(text ? { text } : {}),
       ...(amount !== undefined ? { amount } : {}),
+      ...(x1 !== undefined ? { x1 } : {}),
+      ...(y1 !== undefined ? { y1 } : {}),
+      ...(x2 !== undefined ? { x2 } : {}),
+      ...(y2 !== undefined ? { y2 } : {}),
     },
     reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 500) : '',
     ...(rewritten ? { prompt: rewritten } : {}),
@@ -202,6 +228,17 @@ export function validateImagePlan(
 function explicitRule(intent: string, context: PlanningContext): ImageOperationPlan | undefined {
   if (!context.hasSourceImage) {
     return { tool: 'image.generate', arguments: {}, reason: '編集元画像がないため新規生成' }
+  }
+  /**
+   * 矢印は画面で引いた位置がそのまま引数になる（D-020）。**位置は推測しない**——
+   * どこを指すかは利用者にしか分からない。引いたなら他のツールを選ぶ余地は無い
+   */
+  if (context.arrow) {
+    return {
+      tool: 'image.arrow',
+      arguments: { ...context.arrow },
+      reason: '画面で引いた矢印',
+    }
   }
   // 材料を足したのは画面の操作。他のツールを選ぶと、足した画像が黙って捨てられる（D-021）
   if (context.hasExtraSources) {
