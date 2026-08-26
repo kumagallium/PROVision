@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  MAX_VARIANTS,
   SynthesisForbiddenError,
+  asksForMultipleCandidates,
   planImageOperation,
+  proposeVariantPrompts,
   ruleBasedPlan,
   validateImagePlan,
 } from './planner.js'
@@ -443,5 +446,91 @@ describe('画素を作る操作を使わない設定（D-020）', () => {
     // 使えるものは残る
     expect(closed).toContain('image.rotate')
     expect(closed).toContain('image.brightness')
+  })
+})
+
+describe('1つの指示から複数の候補（D-018）', () => {
+  const planner = {
+    enabled: true,
+    provider: 'openai-compatible' as const,
+    modelId: 'local',
+    apiBase: 'http://localhost:11434/v1',
+    apiKey: '',
+  }
+  const reply = (content: string) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+  it('複数を求めている指示に気づく。ただし数は読み取らない', () => {
+    // 実際に詰まった指示。全角数字で書かれている
+    expect(asksForMultipleCandidates('方向性の違う候補のパターンを３つくらい作ってほしい')).toBe(
+      true,
+    )
+    expect(asksForMultipleCandidates('案を2つ出して')).toBe(true)
+    expect(asksForMultipleCandidates('パターンを複数ください')).toBe(true)
+    expect(asksForMultipleCandidates('候補を三つ')).toBe(true)
+    // 候補の話をしていない指示で誤検知しない
+    expect(asksForMultipleCandidates('もっと余白を取って')).toBe(false)
+    expect(asksForMultipleCandidates('ロゴを作って')).toBe(false)
+    // 「候補」とは言っているが枚数の話がない
+    expect(asksForMultipleCandidates('この候補でいきます')).toBe(false)
+  })
+
+  it('方向の違う案を受け取る', async () => {
+    reply('{"prompts":["A minimal constellation mark.","A dense star map mark."]}')
+    const prompts = await proposeVariantPrompts({
+      intent: '方向の違う案を出して',
+      basePrompt: 'A constellation logo.',
+      count: 2,
+      planner,
+    })
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).not.toBe(prompts[1])
+  })
+
+  it('同じ案が返ってきたら候補になっていない。落として seed 違いへ回させる', async () => {
+    reply('{"prompts":["Same idea.","Same idea.","Same idea."]}')
+    await expect(
+      proposeVariantPrompts({
+        intent: '案を3つ',
+        basePrompt: 'x',
+        count: 3,
+        planner,
+      }),
+    ).rejects.toThrow(/方向の違う案/)
+  })
+
+  it('描く文字列が決まっているなら、それを落とした案は捨てる', async () => {
+    // 文字列が落ちると描画対象が失われる（validateImagePlan と同じ縛り）
+    reply('{"prompts":["Wordmark asterism in serif.","A mark with no lettering.","asterism in a circle."]}')
+    const prompts = await proposeVariantPrompts({
+      intent: '案を出して',
+      basePrompt: 'x',
+      count: 3,
+      text: 'asterism',
+      planner,
+    })
+    expect(prompts).toEqual([
+      'Wordmark asterism in serif.',
+      'asterism in a circle.',
+    ])
+  })
+
+  it('上限を超えて要求されても MAX_VARIANTS までしか返さない', async () => {
+    reply('{"prompts":["a","b","c","d","e","f"]}')
+    const prompts = await proposeVariantPrompts({
+      intent: '案を出して',
+      basePrompt: 'x',
+      count: 99,
+      planner,
+    })
+    expect(prompts).toHaveLength(MAX_VARIANTS)
   })
 })
