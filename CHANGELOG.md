@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.5](https://github.com/kumagallium/PROVision/compare/v0.2.4...v0.2.5) - 2026-08-26
+
+- feat(prov): 指示を節点として置き、候補を1つの会話にまとめる by @kumagallium in https://github.com/kumagallium/PROVision/pull/19
+
 ## [v0.2.4](https://github.com/kumagallium/PROVision/compare/v0.2.3...v0.2.4) - 2026-08-26
 
 - feat(ui): 1つの指示から候補を複数出せるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/17
