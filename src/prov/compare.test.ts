@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ProvGraph } from './graph.js'
 import { alternatesOf, compareGenerations } from './compare.js'
+import type { GenerationActivity } from './types.js'
 
 const bytes = (s: string) => new TextEncoder().encode(s)
 
@@ -138,5 +139,136 @@ describe('alternatesOf', () => {
   it('食い違った相手がいなければ空', () => {
     const { g } = twoMachines()
     expect(alternatesOf(g, 'https://example.org/entity/none')).toEqual([])
+  })
+})
+
+describe('記録した項目の割り振り', () => {
+  /**
+   * **すべての項目に行き先を決める。** 記録はしているのに突き合わせにも画面にも
+   * 出てこない項目が実際に生まれた（pixelOrigin と sourceFile* が 3 フェーズぶん漏れた）。
+   *
+   * `Required<GenerationActivity>` にしてあるので、**型へ項目を足した時点で
+   * ここがコンパイルできなくなる**。そこで初めて「比べるのか、出さないのか」を決める
+   */
+  const complete: Required<GenerationActivity> = {
+    id: 'urn:a',
+    label: 'ラベル',
+    prompt: 'prompt',
+    model: 'model',
+    seed: 1,
+    startedAtTime: '2026-08-26T10:00:00Z',
+    endedAtTime: '2026-08-26T10:00:10Z',
+    intent: 'intent',
+    negativePrompt: 'negative',
+    imageStrength: 0.3,
+    conditioningImageDigest: 'cond',
+    conditioningImageLocation: 'images/cond.png',
+    maskImageDigest: 'mask',
+    maskImageLocation: 'images/mask.png',
+    commandTemplate: 'cmd {out}',
+    reproducibility: 'stochastic',
+    pixelOrigin: 'synthesized',
+    planningMode: 'rules',
+    plannerProvider: 'openai-compatible',
+    plannerModel: 'gpt',
+    selectedTool: 'image.generate',
+    toolArguments: '{}',
+    sourceFileDigest: 'src',
+    sourceFileMediaType: 'image/tiff',
+    sourceFileName: 'figure.tif',
+    provider: 'command:mflux',
+    steps: 8,
+    guidance: 3.5,
+    width: 768,
+    height: 768,
+    planId: 'urn:plan',
+    used: [],
+    referenced: [],
+    generated: 'urn:e',
+    wasAssociatedWith: [],
+  }
+
+  /** 突き合わせる項目（`ACTIVITY_FIELDS` と 1 対 1） */
+  const COMPARED = [
+    'prompt',
+    'negativePrompt',
+    'model',
+    'provider',
+    'seed',
+    'steps',
+    'guidance',
+    'width',
+    'imageStrength',
+    'conditioningImageDigest',
+    'maskImageDigest',
+    'selectedTool',
+    'toolArguments',
+    'commandTemplate',
+    'planningMode',
+    'plannerModel',
+    'reproducibility',
+    'pixelOrigin',
+    'sourceFileName',
+    'sourceFileDigest',
+    'sourceFileMediaType',
+  ]
+
+  /** 突き合わせない項目と、その理由 */
+  const NOT_COMPARED: Record<string, string> = {
+    id: 'IRI は中身から決まる。違えば中身が違うということで、差分にはならない',
+    label: '表示名。絵には効かない',
+    intent: '利用者の生の言葉。書き直しの差は prompt に出る',
+    startedAtTime: '毎回違う。出すと差分の意味が消える',
+    endedAtTime: '同上',
+    height: 'width と一緒に size として 1 項目で見る',
+    conditioningImageLocation: '場所は digest が同じなら同じもの',
+    maskImageLocation: '同上',
+    plannerProvider: 'plannerModel と一緒に見る',
+    planId: 'どの送信から走ったか。絵には効かない（D-022）',
+    used: '系譜の形。突き合わせるのは同じ指定の 2 版なので、ここは前提',
+    referenced: '人が見た外部データ。絵には効かない（D-006）',
+    generated: '生まれた画像そのもの。違うから突き合わせている',
+    wasAssociatedWith: 'Agent の層は AGENT_FIELDS で別に見る',
+  }
+
+  it('記録している項目は、比べるか・比べない理由があるかのどちらか', () => {
+    for (const key of Object.keys(complete)) {
+      const decided = COMPARED.includes(key) || key in NOT_COMPARED
+      expect(decided, `${key} の行き先が決まっていない`).toBe(true)
+    }
+  })
+
+  it('後から足した項目も実際に差分へ出る', () => {
+    const g = new ProvGraph()
+    const first = g.recordGeneration({
+      image: bytes('cmp-1'),
+      label: '取り込み',
+      prompt: '取り込み',
+      model: 'import',
+      seed: 0,
+      pixelOrigin: 'external',
+      sourceFileName: 'a.tif',
+      sourceFileDigest: 'aaa',
+      startedAtTime: '2026-08-26T10:00:00Z',
+      endedAtTime: '2026-08-26T10:00:00Z',
+    })
+    const second = g.recordGeneration({
+      image: bytes('cmp-2'),
+      label: '取り込み',
+      prompt: '取り込み',
+      model: 'import',
+      seed: 0,
+      pixelOrigin: 'geometric',
+      sourceFileName: 'b.tif',
+      sourceFileDigest: 'bbb',
+      // Activity の IRI は再実行に要る情報と開始時刻から決まる。揃えると同じ IRI に畳まれる
+      startedAtTime: '2026-08-26T11:00:00Z',
+      endedAtTime: '2026-08-26T11:00:00Z',
+      alternateOf: first.id,
+    })
+    const labels = compareGenerations(g, first.id, second.id).differences.map((d) => d.label)
+    expect(labels).toContain('pixel origin')
+    expect(labels).toContain('source file')
+    expect(labels).toContain('source file sha256')
   })
 })
