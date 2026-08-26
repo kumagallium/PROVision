@@ -53,6 +53,7 @@ import {
   MAX_VARIANTS,
   SynthesisForbiddenError,
   asksForMultipleCandidates,
+  editScopeOf,
   planImageOperation,
   proposeVariantPrompts,
   type ImageToolName,
@@ -1015,6 +1016,8 @@ app.post('/api/generate', async (c) => {
             Boolean(source),
             Boolean(body.maskedImage),
             plan.arguments.text,
+            // 作り替えの依頼へ保存を求めると自己矛盾し、絵が変わらない（D-023）
+            editScopeOf(plan, instruction),
           )
         : instruction
     const usesImageModel =

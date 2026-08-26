@@ -10,7 +10,9 @@ import {
 import {
   isTextAdditionIntent,
   isTextRestyleIntent,
+  isWholeImageIntent,
   isWordmarkGapIntent,
+  type EditScope,
 } from '../image/prompt.js'
 import { resolveAiApiBase } from './provider.js'
 
@@ -38,6 +40,11 @@ export interface ImageOperationPlan {
   reason: string
   /** LLMが利用者の雑な指示を画像モデル向けに書き直した全文。image.generate / image.edit のみ */
   prompt?: string
+  /**
+   * 一部を直すのか、全体を作り替えるのか（D-023）。**保存を求める文を出すかどうかが変わる**。
+   * 作り替えの依頼へ保存を求めると自己矛盾し、絵がほとんど変わらない
+   */
+  scope?: EditScope
 }
 
 export interface PlannedImageOperation {
@@ -206,6 +213,15 @@ export function validateImagePlan(
       throw new Error('promptには推定したtextをそのまま含めます')
     }
   }
+  /**
+   * 全体を作り替える依頼か（D-023）。LLM が答えていればそれを使い、
+   * 答えていなければ指示の言葉から当てる。**判断は指示を読んだ側のほうが確か**
+   */
+  const scope: EditScope | undefined = spec.usesPrompt
+    ? raw.scope === 'whole' || raw.scope === 'local'
+      ? raw.scope
+      : undefined
+    : undefined
   return {
     tool,
     arguments: {
@@ -222,7 +238,16 @@ export function validateImagePlan(
     },
     reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 500) : '',
     ...(rewritten ? { prompt: rewritten } : {}),
+    ...(scope ? { scope } : {}),
   }
+}
+
+/**
+ * 実際に使う編集の範囲（D-023）。LLM が答えていればそれ、無ければ指示の言葉から当てる。
+ * **規則で当てにいくのは、LLM が答えなかったときだけ**である。
+ */
+export function editScopeOf(plan: ImageOperationPlan, intent: string): EditScope {
+  return plan.scope ?? (isWholeImageIntent(intent) ? 'whole' : 'local')
 }
 
 function explicitRule(intent: string, context: PlanningContext): ImageOperationPlan | undefined {
@@ -594,6 +619,7 @@ export async function planImageOperation(input: {
     'When the user asks to add lettering (wordmark/logotype), set arguments.text to the exact string (<=40 chars). Take it from the instruction, or from the lineage when the instruction does not name it. Omit arguments.text when no name is available anywhere.',
     'Context.parentTool is the tool that produced the current picture, and Context.parentText is the lettering it drew. When parentTool is image.wordmark and the user wants to change the gap, margin, or spacing around that lettering, choose image.wordmark again: set arguments.text to Context.parentText and arguments.padding in pixels (roughly 8 for tight, 24 for default, 60 for airy). The band is rebuilt from the artwork underneath, so nothing is lost. Do not use image.edit for that — the diffusion model repaints everything and drops the lettering.',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
+    'Also set "scope" for those two tools: "whole" when the instruction asks to restyle, simplify, abstract, flatten, or otherwise redraw the entire picture, and "local" when it changes only one part or detail. Default to "local". This decides whether the image model is told to preserve the existing composition — telling it to preserve everything while asking for a restyle contradicts itself, and the picture comes back unchanged.',
     'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
     'If arguments.text is set, the rewritten prompt must contain that exact string.',
     `Context: ${JSON.stringify(input.context)}`,
