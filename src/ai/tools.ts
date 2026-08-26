@@ -22,6 +22,8 @@ export type ImageToolName =
   | 'image.compose'
   | 'image.brightness'
   | 'image.contrast'
+  | 'image.gamma'
+  | 'image.scalebar'
   | 'background.remove'
   | 'image.import'
 
@@ -262,6 +264,29 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
     requiredArguments: ['amount'],
     accepts: ['amount'],
     examples: [{ intent: 'コントラストを30上げて' }, { intent: 'コントラストを下げて' }],
+  },
+  {
+    name: 'image.gamma',
+    executor: 'jimp',
+    pixelOrigin: 'photometric',
+    purpose:
+      'apply gamma correction to the WHOLE image by the same rule; arguments.amount is the percent change, where 0 keeps it, 100 doubles the gamma (brighter midtones), and -50 halves it',
+    requiresSourceImage: true,
+    requiredArguments: ['amount'],
+    accepts: ['amount'],
+    examples: [{ intent: 'ガンマを20上げて' }],
+  },
+  {
+    name: 'image.scalebar',
+    executor: 'jimp',
+    pixelOrigin: 'annotated',
+    purpose:
+      'draw a scale bar in the bottom-right corner with a font. Requires arguments.text (the label the user stated, such as "10 um") and arguments.width (the bar length in pixels). PROVision does not know the physical scale — both come from the user',
+    avoidWhen: 'the user did not state both the label and the bar length in pixels',
+    requiresSourceImage: true,
+    requiredArguments: ['text', 'width'],
+    accepts: ['text', 'width'],
+    examples: [{ intent: '「10 um」のスケールバーを幅120pxで入れて' }],
   },
   {
     name: 'background.remove',

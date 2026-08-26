@@ -47,6 +47,24 @@ describe('画像全体の明暗（D-020 の photometric）', () => {
     expect(await at(-50)).toBeLessThan(base)
   })
 
+  it('ガンマは amount=0 で無変換、正で中間調が明るくなる', async () => {
+    const source = await sourceImage()
+    const at = async (amount: number) =>
+      firstRed(
+        (
+          await processStandardImage({
+            tool: 'image.gamma',
+            arguments: { amount },
+            imagePath: source.path,
+            imageDigest: source.digest,
+          })
+        ).png,
+      )
+    expect(await at(0)).toBe(0x33)
+    expect(await at(100)).toBeGreaterThan(0x33)
+    expect(await at(-50)).toBeLessThan(0x33)
+  })
+
   it('コントラストは amount=0 で無変換', async () => {
     const source = await sourceImage()
     const result = await processStandardImage({
@@ -81,6 +99,40 @@ describe('画像全体の明暗（D-020 の photometric）', () => {
     // 0x40 と 0x80 に同じ倍率 1.5 がかかる
     expect(left).toBe(0x60)
     expect(right).toBe(0xc0)
+  })
+})
+
+describe('スケールバー（D-020 の annotated）', () => {
+  it('元の画素を書き換えず、右下へ重ねる', async () => {
+    const source = await sourceImage()
+    const result = await processStandardImage({
+      tool: 'image.scalebar',
+      arguments: { text: '10 um', width: 40 },
+      imagePath: source.path,
+      imageDigest: source.digest,
+    })
+    const out = await Jimp.read(Buffer.from(result.png))
+    // 寸法は変わらない。帯を継ぎ足すワードマークとはそこが違う
+    expect(out.bitmap.width).toBe(100)
+    expect(out.bitmap.height).toBe(60)
+    // 左上は元のまま
+    expect(out.getPixelColor(0, 0)).toBe(0x334455ff)
+    // 右下に棒が引かれている（幅 40・余白 8・太さ 3 なので x 52..91 / y 49..51）
+    expect(out.getPixelColor(60, 50)).not.toBe(0x334455ff)
+    // 棒の外は元のまま。全面へ何かを敷いてはいない
+    expect(out.getPixelColor(10, 50)).toBe(0x334455ff)
+  })
+
+  it('物理的な尺度は分からないので、文字列と長さの両方が要る', async () => {
+    const source = await sourceImage()
+    await expect(
+      processStandardImage({
+        tool: 'image.scalebar',
+        arguments: { text: '10 um' },
+        imagePath: source.path,
+        imageDigest: source.digest,
+      }),
+    ).rejects.toThrow(/棒の長さ/)
   })
 })
 
