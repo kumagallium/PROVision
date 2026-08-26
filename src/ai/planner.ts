@@ -216,6 +216,27 @@ function explicitRule(intent: string, context: PlanningContext): ImageOperationP
     return { tool: 'image.erase', arguments: {}, reason: '範囲指定を伴う削除・修復指示' }
   }
   const quoted = /[「『"“']([^」』"”']{1,40})[」』"”']/.exec(intent)?.[1]?.trim()
+  /**
+   * スケールバー（D-020 の annotated）。**ワードマークより先に見る**——
+   * 「入れて」は文字追加とも読めるので、後ろに置くと帯が継ぎ足される。
+   * 物理的な尺度は分からないので、棒の長さも文字列も利用者が言ったものだけを使う
+   */
+  if (/(スケールバー|scale\s?bar)/i.test(intent)) {
+    const px = /(\d{1,4})\s*(?:px|ピクセル)/i.exec(intent)
+    if (quoted && px) {
+      return {
+        tool: 'image.scalebar',
+        arguments: { text: quoted, width: Number(px[1]) },
+        reason: 'スケールバーの明示指示',
+      }
+    }
+  }
+  if (/(ガンマ|gamma)/i.test(intent)) {
+    const digits = /(\d{1,3})/.exec(intent)
+    const down = /(下げ|落と|弱め|decrease|lower)/i.test(intent)
+    const amount = digits ? Number(digits[1]) * (down ? -1 : 1) : down ? -20 : 20
+    return { tool: 'image.gamma', arguments: { amount }, reason: 'ガンマの明示指示' }
+  }
   // 既にある文字を整える依頼は追加ではない。確定描画で重ねると二重になる
   if (quoted && isTextAdditionIntent(intent) && !isTextRestyleIntent(intent)) {
     // 拡散モデルは字形を崩す。文字列が分かっているならフォントで置く

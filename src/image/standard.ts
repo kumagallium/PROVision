@@ -24,6 +24,8 @@ export type StandardImageTool = Extract<
   | 'image.wordmark'
   | 'image.brightness'
   | 'image.contrast'
+  | 'image.gamma'
+  | 'image.scalebar'
 >
 
 /** 帯の高さは文字高に対する比。シンボルと文字が窮屈にならない値（試作で決めた） */
@@ -169,6 +171,67 @@ export async function processStandardImage(input: StandardImageInput): Promise<G
   } else if (input.tool === 'image.contrast') {
     // Jimp の contrast は -1〜1 で 0 が無変換。amount はそのまま％
     image.contrast((input.arguments.amount ?? 0) / 100)
+  } else if (input.tool === 'image.gamma') {
+    /**
+     * ガンマ補正。**非線形**なので、明るさ・コントラストとは別のツールにしてある。
+     * amount は「無変換からの変化率（％）」で、0 が無変換（明るさ・コントラストと揃える）。
+     * 画像全体に同じ写像をかける——局所補正はしない（D-020）
+     */
+    const gamma = Math.max(0.1, 1 + (input.arguments.amount ?? 0) / 100)
+    const table = new Uint8Array(256)
+    for (let value = 0; value < 256; value += 1) {
+      table[value] = Math.round(255 * (value / 255) ** (1 / gamma))
+    }
+    const data = image.bitmap.data
+    for (let offset = 0; offset < data.length; offset += 4) {
+      // アルファは触らない。透明度を変えるのは明暗の調整ではない
+      data[offset] = table[data[offset]!]!
+      data[offset + 1] = table[data[offset + 1]!]!
+      data[offset + 2] = table[data[offset + 2]!]!
+    }
+  } else if (input.tool === 'image.scalebar') {
+    const label = input.arguments.text?.trim()
+    const barWidth = input.arguments.width
+    if (!label || barWidth === undefined) {
+      throw new Error('image.scalebarには描く文字列と棒の長さ（px）が必要です')
+    }
+    /**
+     * スケールバー。**物理的な尺度は PROVision には分からない**ので、
+     * 棒の長さ（px）も文字列も利用者が言ったものをそのまま描く。両方とも来歴へ残るので、
+     * 主張の責任は人間 Agent にある（D-006）。
+     *
+     * 元の画素は書き換えず、右下へ重ねるだけ（`pixelOrigin` は `annotated`）
+     */
+    const bar = Math.min(barWidth, Math.round(width * 0.9))
+    const thickness = Math.max(3, Math.round(height * 0.008))
+    const margin = Math.max(8, Math.round(Math.min(width, height) * 0.04))
+    // 右下の地の明るさで色を決める。明るい地に白を置くと読めない
+    const sample = image.getPixelColor(
+      Math.max(0, width - margin - Math.round(bar / 2)),
+      Math.max(0, height - margin - thickness),
+    )
+    const luminance =
+      0.299 * ((sample >>> 24) & 255) +
+      0.587 * ((sample >>> 16) & 255) +
+      0.114 * ((sample >>> 8) & 255)
+    const light = luminance < 140
+    const ink = light ? 0xffffffff : 0x000000ff
+    const font = await loadFont(light ? SANS_16_WHITE : SANS_16_BLACK)
+    const textWidth = measureText(font, label)
+    const textHeight = measureTextHeight(font, label, width)
+    const barX = Math.max(0, width - margin - bar)
+    const barY = Math.max(0, height - margin - thickness)
+    for (let y = barY; y < Math.min(height, barY + thickness); y += 1) {
+      for (let x = barX; x < Math.min(width, barX + bar); x += 1) {
+        image.setPixelColor(ink, x, y)
+      }
+    }
+    image.print({
+      font,
+      x: Math.max(0, barX + Math.round((bar - textWidth) / 2)),
+      y: Math.max(0, barY - textHeight - Math.round(thickness / 2)),
+      text: label,
+    })
   } else if (input.tool === 'image.rotate') {
     image.rotate(input.arguments.angle!)
   } else if (input.tool === 'image.resize') {
