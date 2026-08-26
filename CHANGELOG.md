@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.12](https://github.com/kumagallium/PROVision/compare/v0.2.11...v0.2.12) - 2026-08-26
+
+- fix(ui): 過去の会話でノードが重なるのと、生成後にグラフが空になるのを直す by @kumagallium in https://github.com/kumagallium/PROVision/pull/36
+
 ## [v0.2.11](https://github.com/kumagallium/PROVision/compare/v0.2.10...v0.2.11) - 2026-08-26
 
 - fix(image): 作り替えの依頼に「すべて保て」を付けないようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/34
