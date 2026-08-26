@@ -20,6 +20,11 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** 起動時に自動で確認した結果。見つかったら設定ボタンに印を出す */
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
+  /**
+   * 生成の進み具合。**まだ会話が無いときは真ん中の面が空**なので、
+   * ここが動いていないと止まって見える（1 枚 1〜2 分かかる）
+   */
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   const applyDoc = useCallback((doc: ProvJsonLdDocument) => {
     setGraph(fromProvJsonLd(doc, DEFAULT_BASE))
@@ -118,14 +123,33 @@ export function App() {
               placeItems: 'center',
               color: '#8b98a1',
               fontSize: 13,
+              textAlign: 'center',
+              padding: 24,
             }}
           >
-            左から会話を選ぶと、その会話の来歴が出ます。
+            {progress ? (
+              <div>
+                <div style={{ color: '#5b8fb9', fontSize: 14, marginBottom: 6 }}>
+                  生成中… {progress.done}/{progress.total} 枚
+                </div>
+                <div>
+                  1 枚 1〜2 分かかります。できたものから右のチャットに出ます。
+                </div>
+              </div>
+            ) : (
+              '左から会話を選ぶと、その会話の来歴が出ます。'
+            )}
           </div>
         )}
       </ReactFlowProvider>
 
-      <ChatPane graph={graph} current={current} onGraph={applyDoc} onSelect={setCurrent} />
+      <ChatPane
+        graph={graph}
+        current={current}
+        onGraph={applyDoc}
+        onSelect={setCurrent}
+        onProgress={setProgress}
+      />
 
       {settingsOpen ? (
         <SettingsDialog
