@@ -127,6 +127,11 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     ...(a.plannerModel ? { 'provision:plannerModel': lit(a.plannerModel) } : {}),
     ...(a.selectedTool ? { 'provision:selectedTool': lit(a.selectedTool) } : {}),
     ...(a.toolArguments ? { 'provision:toolArguments': lit(a.toolArguments) } : {}),
+    ...(a.sourceFileDigest ? { 'provision:sourceFileDigest': lit(a.sourceFileDigest) } : {}),
+    ...(a.sourceFileMediaType
+      ? { 'provision:sourceFileMediaType': lit(a.sourceFileMediaType) }
+      : {}),
+    ...(a.sourceFileName ? { 'provision:sourceFileName': lit(a.sourceFileName) } : {}),
     ...(a.provider ? { 'provision:provider': lit(a.provider) } : {}),
     ...optionalNumber('provision:steps', a.steps, `${XSD}integer`),
     ...optionalNumber('provision:guidance', a.guidance, `${XSD}decimal`),
@@ -144,7 +149,12 @@ function activityNode(a: GenerationActivity): JsonLdNode {
 }
 
 /** 読み戻しで受け付ける等級。知らない値は載せない（D-016） */
-const REPRODUCIBILITY_VALUES = ['deterministic', 'environment-dependent', 'stochastic']
+const REPRODUCIBILITY_VALUES = [
+  'deterministic',
+  'environment-dependent',
+  'stochastic',
+  'external',
+]
 
 /** 読み戻しで受け付ける画素の由来。知らない値は載せない（D-020） */
 const PIXEL_ORIGIN_VALUES = [
@@ -424,10 +434,10 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(REPRODUCIBILITY_VALUES.includes(str(n, 'provision:reproducibility') ?? '')
         ? {
-            reproducibility: str(n, 'provision:reproducibility') as
-              | 'deterministic'
-              | 'environment-dependent'
-              | 'stochastic',
+            reproducibility: str(
+              n,
+              'provision:reproducibility',
+            ) as GenerationActivity['reproducibility'],
           }
         : {}),
       ...(PIXEL_ORIGIN_VALUES.includes(str(n, 'provision:pixelOrigin') ?? '')
@@ -450,6 +460,15 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         : {}),
       ...(str(n, 'provision:toolArguments') !== undefined
         ? { toolArguments: str(n, 'provision:toolArguments')! }
+        : {}),
+      ...(str(n, 'provision:sourceFileDigest') !== undefined
+        ? { sourceFileDigest: str(n, 'provision:sourceFileDigest')! }
+        : {}),
+      ...(str(n, 'provision:sourceFileMediaType') !== undefined
+        ? { sourceFileMediaType: str(n, 'provision:sourceFileMediaType')! }
+        : {}),
+      ...(str(n, 'provision:sourceFileName') !== undefined
+        ? { sourceFileName: str(n, 'provision:sourceFileName')! }
         : {}),
       ...(str(n, 'provision:provider') !== undefined
         ? { provider: str(n, 'provision:provider')! }

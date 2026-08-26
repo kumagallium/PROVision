@@ -20,12 +20,13 @@ export type ImageToolName =
   | 'image.resize'
   | 'image.wordmark'
   | 'background.remove'
+  | 'image.import'
 
 /** 引数名。ツールごとに受け取れるものを accepts で宣言する */
 export type ImageToolArgumentName = 'angle' | 'width' | 'height' | 'padding' | 'text'
 
 /** 誰が実行するか。振り分けはこの値だけを見る */
-export type ImageToolExecutor = 'image-model' | 'jimp' | 'inpaint' | 'background'
+export type ImageToolExecutor = 'image-model' | 'jimp' | 'inpaint' | 'background' | 'import'
 
 /**
  * 別の PC で同じ指定を出したとき、どこまで同じ絵になるか（D-016）。
@@ -33,8 +34,16 @@ export type ImageToolExecutor = 'image-model' | 'jimp' | 'inpaint' | 'background
  * - `deterministic`: 整数・確定的な演算だけ。どの PC でも同じ画素になる
  * - `environment-dependent`: 乱数は使わないが、モデルとバージョンが一致して初めて同じ
  * - `stochastic`: 環境が変われば変わりうる。ビット一致は保証しない（D-015）
+ * - `external`: **再現の対象外。元のファイルが要る**（取り込み。D-019）
+ *
+ * `external` を `stochastic` に潰さない。「環境が変われば変わりうる」と
+ * 「そもそも記録から作れない」は別のことで、混ぜると系譜全体の等級の意味が壊れる。
  */
-export type ReproducibilityGrade = 'deterministic' | 'environment-dependent' | 'stochastic'
+export type ReproducibilityGrade =
+  | 'deterministic'
+  | 'environment-dependent'
+  | 'stochastic'
+  | 'external'
 
 /**
  * 等級は **executor 単位**で持つ。ツール単位に散らすと、ツールを 1 つ足したときに
@@ -45,6 +54,7 @@ export const EXECUTOR_REPRODUCIBILITY: Record<ImageToolExecutor, Reproducibility
   inpaint: 'environment-dependent',
   background: 'environment-dependent',
   'image-model': 'stochastic',
+  import: 'external',
 }
 
 /**
@@ -98,6 +108,12 @@ export interface ImageToolDefinition {
   purpose: string
   /** 選んではいけない場面。誤分類の歯止めで、LLM への説明にも足す */
   avoidWhen?: string
+  /**
+   * 指示から選べるか。**既定は選べる。** 取り込みのように、利用者のファイル操作から
+   * 直接起きるツールだけ false にする。false のものは LLM へ渡す一覧にも載せず、
+   * 計画の検証でも拒む——「取り込んで」と言われても、渡すファイルが無い
+   */
+  selectableByInstruction?: boolean
   /** 編集元画像の要否。'forbidden' は「あってはならない」 */
   requiresSourceImage: boolean | 'forbidden'
   /** 利用者が指定した編集範囲を必須にするか */
@@ -211,6 +227,16 @@ export const IMAGE_TOOLS: readonly ImageToolDefinition[] = [
     accepts: [],
     examples: [{ intent: '背景を透明にして' }],
   },
+  {
+    name: 'image.import',
+    executor: 'import',
+    pixelOrigin: 'external',
+    purpose: 'record an image brought in from outside PROVision',
+    // 画面のファイル操作からしか起きない。指示からは選ばせない（D-019）
+    selectableByInstruction: false,
+    requiresSourceImage: 'forbidden',
+    accepts: [],
+  },
 ]
 
 /** 画面へ出すときの引数名。機械的な英名だけだと利用者に伝わらない */
@@ -249,6 +275,8 @@ export function imageToolReproducibility(name: ImageToolName): ReproducibilityGr
 export function weakestReproducibility(
   grades: readonly ReproducibilityGrade[],
 ): ReproducibilityGrade {
+  // 取り込みが一番弱い。元のファイルが手元に無ければ、他がどれだけ確定的でも作れない
+  if (grades.includes('external')) return 'external'
   if (grades.includes('stochastic')) return 'stochastic'
   if (grades.includes('environment-dependent')) return 'environment-dependent'
   return 'deterministic'
@@ -259,6 +287,7 @@ export const REPRODUCIBILITY_LABELS: Record<ReproducibilityGrade, string> = {
   deterministic: 'どの PC でも同じ絵になる',
   'environment-dependent': 'ツールの版が同じなら同じ絵になる',
   stochastic: '環境が変わると絵も変わりうる',
+  external: '外から取り込んだので、元のファイルが要る',
 }
 
 /** そのツールが画素をどう触るか（D-020） */
@@ -317,9 +346,17 @@ export const PIXEL_ORIGIN_LABELS: Record<PixelOrigin, string> = {
   external: '外から取り込んだ。この手前は記録の外',
 }
 
-/** LLM へ渡すツール一覧。説明文を定義から組み立てるので、書き漏れが起きない */
+/** 指示から選べるツールか（D-019）。取り込みだけ選べない */
+export function isSelectableByInstruction(name: ImageToolName): boolean {
+  return imageToolDefinition(name).selectableByInstruction !== false
+}
+
+/**
+ * LLM へ渡すツール一覧。説明文を定義から組み立てるので、書き漏れが起きない。
+ * **指示から選べないツールは載せない**——載せると選ばれてしまう
+ */
 export function toolCatalogForPrompt(): string {
-  return IMAGE_TOOLS.map((tool) => {
+  return IMAGE_TOOLS.filter((tool) => tool.selectableByInstruction !== false).map((tool) => {
     const parts = [`- ${tool.name}: ${tool.purpose}`]
     if (tool.requiresEditRegion) parts.push('requires a user-selected edit region')
     if (tool.avoidWhen) parts.push(`Do not choose it when ${tool.avoidWhen}`)

@@ -6,6 +6,7 @@ import {
   PIXEL_ORIGIN_LABELS,
   imageToolDefinition,
   imageToolPixelOrigin,
+  isSelectableByInstruction,
   imageToolReproducibility,
   lineagePixelOrigin,
   weakestReproducibility,
@@ -31,10 +32,15 @@ describe('画像ツールの定義', () => {
     }
   })
 
-  it('LLMへ渡す一覧に、すべてのツールと注意書きが載る', () => {
+  it('LLMへ渡す一覧には、指示から選べるツールだけが載る', () => {
     const catalog = toolCatalogForPrompt()
     for (const tool of IMAGE_TOOLS) {
-      expect(catalog).toContain(tool.name)
+      if (isSelectableByInstruction(tool.name)) {
+        expect(catalog, `${tool.name}が一覧から抜けている`).toContain(tool.name)
+      } else {
+        // 載せると選ばれてしまう。渡すファイルが無いので必ず失敗する（D-019）
+        expect(catalog, `${tool.name}を一覧へ載せてはいけない`).not.toContain(tool.name)
+      }
     }
     // 誤分類の歯止めが説明から抜けない
     expect(catalog).toContain('Do not choose it when')
@@ -46,6 +52,14 @@ describe('画像ツールの定義', () => {
       const context = {
         hasSourceImage: spec.requiresSourceImage !== 'forbidden',
         hasEditRegion: true,
+      }
+      if (!isSelectableByInstruction(tool.name)) {
+        // 指示からは選べないツール。計画として渡ってきたら拒む（D-019）
+        expect(() =>
+          validateImagePlan({ tool: tool.name, arguments: {} }, context),
+          `${tool.name}は指示から選べてはいけない`,
+        ).toThrow()
+        continue
       }
       // 必須引数を満たした最小の計画は、必ず通る
       const args: Record<string, unknown> = {}
@@ -171,6 +185,14 @@ describe('画素の由来（D-020）', () => {
       counted: 2,
     })
     expect(lineagePixelOrigin([])).toMatchObject({ synthesized: 0, counted: 0 })
+  })
+
+  it('取り込みは external。系譜は一番弱い辺へ落ちるので external になる', () => {
+    expect(imageToolReproducibility('image.import')).toBe('external')
+    expect(imageToolPixelOrigin('image.import')).toBe('external')
+    // 元のファイルが手元に無ければ、他がどれだけ確定的でも作れない
+    expect(weakestReproducibility(['deterministic', 'external'])).toBe('external')
+    expect(weakestReproducibility(['stochastic', 'external'])).toBe('external')
   })
 
   it('external は強さの序列に入らず、別に併記される', () => {

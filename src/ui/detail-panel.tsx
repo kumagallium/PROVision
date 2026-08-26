@@ -13,7 +13,6 @@ import {
   lineagePixelOrigin,
   weakestReproducibility,
   type PixelOrigin,
-  type ReproducibilityGrade,
 } from '../ai/tools.js'
 
 const CODE: React.CSSProperties = {
@@ -71,6 +70,15 @@ export function DetailPanel({
             ? [`conditioning image: ${activity.conditioningImageDigest}`]
             : []),
           ...(activity.maskImageDigest ? [`inpainting mask: ${activity.maskImageDigest}`] : []),
+          // 取り込みの再実行に要るのは元のファイル（D-019）。手元のファイルと
+          // 突き合わせられるように、画素ではなくバイト列のハッシュを出す
+          ...(activity.sourceFileName ? [`source file: ${activity.sourceFileName}`] : []),
+          ...(activity.sourceFileMediaType
+            ? [`source type: ${activity.sourceFileMediaType}`]
+            : []),
+          ...(activity.sourceFileDigest
+            ? [`source file sha256: ${activity.sourceFileDigest}`]
+            : []),
           ...(activity.selectedTool ? [`tool:   ${activity.selectedTool}`] : []),
           ...(activity.toolArguments ? [`tool arguments: ${activity.toolArguments}`] : []),
           ...(activity.planningMode
@@ -125,7 +133,7 @@ export function reproducibilityLines(graph: ProvGraph, entityId: string): string
   const chain = graph.lineage(entityId)
   const grades = chain
     .map((a) => a.reproducibility)
-    .filter((g): g is ReproducibilityGrade => g !== undefined)
+    .filter((g): g is NonNullable<typeof g> => g !== undefined)
 
   const lines: string[] = []
   if (activity?.reproducibility) {
