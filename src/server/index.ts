@@ -516,6 +516,8 @@ interface GenerateBody {
   variants?: number
   /** 材料として足す別の画像（D-021）。parent と合わせて融合する */
   extraParents?: string[]
+  /** 画面で引いた矢印（D-020）。位置は画像の大きさに対する％ */
+  arrow?: { x1?: number; y1?: number; x2?: number; y2?: number; text?: string }
 }
 
 /** 一度に足せる材料の数。parent と合わせて 4 枚まで */
@@ -840,6 +842,45 @@ app.post('/api/generate', async (c) => {
     }
     const source = body.parent ? sourceImageOf(body.parent) : undefined
     const extraSources = extraParents.map((id) => sourceImageOf(id))
+
+    /**
+     * 画面で引いた矢印（D-020）。**位置は引数そのもの**なので、有無ではなく値を渡す。
+     * どこを指すかは利用者にしか分からず、こちらでは推測しない
+     */
+    const percent = (value: unknown) =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100
+        ? value
+        : undefined
+    const arrowInput = body.arrow
+      ? {
+          x1: percent(body.arrow.x1),
+          y1: percent(body.arrow.y1),
+          x2: percent(body.arrow.x2),
+          y2: percent(body.arrow.y2),
+        }
+      : undefined
+    const arrowLabel =
+      typeof body.arrow?.text === 'string' ? body.arrow.text.trim().slice(0, 40) : ''
+    const arrow =
+      arrowInput &&
+      arrowInput.x1 !== undefined &&
+      arrowInput.y1 !== undefined &&
+      arrowInput.x2 !== undefined &&
+      arrowInput.y2 !== undefined
+        ? {
+            x1: arrowInput.x1,
+            y1: arrowInput.y1,
+            x2: arrowInput.x2,
+            y2: arrowInput.y2,
+            ...(arrowLabel ? { text: arrowLabel } : {}),
+          }
+        : undefined
+    if (body.arrow && !arrow) {
+      return c.json({ error: '矢印の位置は 0〜100 の整数（％）で指定します' }, 400)
+    }
+    if (arrow && !source) {
+      return c.json({ error: '矢印を引くには親画像が必要です' }, 400)
+    }
     if ((body.maskedImage || body.maskImage) && !source) {
       return c.json({ error: '編集範囲を指定するには親画像が必要です' }, 400)
     }
@@ -863,6 +904,7 @@ app.post('/api/generate', async (c) => {
         hasSourceImage: Boolean(source),
         hasEditRegion: Boolean(body.maskImage),
         hasExtraSources: extraSources.length > 0,
+        ...(arrow ? { arrow } : {}),
         forbidSynthesis: (await readPolicy()).forbidSynthesis,
         // 画素からは分からない「この絵の作られ方」を渡す
         ...(parentActivity?.selectedTool

@@ -5,6 +5,7 @@ import { Jimp } from 'jimp'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sha256 } from '../prov/sha256.js'
 import { processStandardImage } from './standard.js'
+import { validateImagePlan } from '../ai/planner.js'
 
 const dirs: string[] = []
 
@@ -133,6 +134,51 @@ describe('スケールバー（D-020 の annotated）', () => {
         imageDigest: source.digest,
       }),
     ).rejects.toThrow(/棒の長さ/)
+  })
+})
+
+describe('矢印（D-020 の annotated）', () => {
+  it('元の画素を書き換えず、指した所に重ねる', async () => {
+    const source = await sourceImage()
+    const result = await processStandardImage({
+      tool: 'image.arrow',
+      // 左上（10%,10%）から中央（50%,50%）へ
+      arguments: { x1: 10, y1: 10, x2: 50, y2: 50 },
+      imagePath: source.path,
+      imageDigest: source.digest,
+    })
+    const out = await Jimp.read(Buffer.from(result.png))
+    // 寸法は変わらない
+    expect(out.bitmap.width).toBe(100)
+    expect(out.bitmap.height).toBe(60)
+    // 線の上には何か描かれている（10%,10% → x=9.9, y=5.9 あたり）
+    expect(out.getPixelColor(10, 6)).not.toBe(0x334455ff)
+    // 右下は元のまま。全面へ何かを敷いてはいない
+    expect(out.getPixelColor(95, 55)).toBe(0x334455ff)
+  })
+
+  it('位置は％なので、寸法が違っても同じ割合の所を指す', async () => {
+    // 画素で受け取ると、後からリサイズしたときに指す所がずれる
+    const source = await sourceImage()
+    const result = await processStandardImage({
+      tool: 'image.arrow',
+      arguments: { x1: 0, y1: 0, x2: 100, y2: 100 },
+      imagePath: source.path,
+      imageDigest: source.digest,
+    })
+    const out = await Jimp.read(Buffer.from(result.png))
+    // 対角線なので、両端に描かれている
+    expect(out.getPixelColor(0, 0)).not.toBe(0x334455ff)
+    expect(out.getPixelColor(99, 59)).not.toBe(0x334455ff)
+  })
+
+  it('始点と終点が同じでは向きが決まらないので拒む', () => {
+    expect(() =>
+      validateImagePlan(
+        { tool: 'image.arrow', arguments: { x1: 20, y1: 20, x2: 20, y2: 20 } },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow(/始点と終点/)
   })
 })
 
