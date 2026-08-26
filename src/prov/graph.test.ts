@@ -252,3 +252,55 @@ describe('1 回の送信を節点として置く（D-022）', () => {
     expect(g.roots().map((e) => e.id).sort()).toEqual([one.id, two.id].sort())
   })
 })
+
+describe('複数の画像を材料にする（D-021）', () => {
+  /** 別々の会話にある 2 枚を材料に、1 枚作った状態 */
+  function merged() {
+    const g = new ProvGraph()
+    const left = g.recordGeneration(base({ image: bytes('left-root'), label: '左の会話' }))
+    const right = g.recordGeneration(
+      base({ image: bytes('right-root'), label: '右の会話', seed: 2 }),
+    )
+    const fused = g.recordGeneration(
+      base({
+        image: bytes('fused'),
+        label: '融合した版',
+        seed: 3,
+        // 材料は全部 used に入る
+        derivedFrom: [left.id, right.id],
+        // 会話をたどるのは利用者が居た版
+        branchedFrom: left.id,
+        startedAtTime: '2026-08-26T12:00:00Z',
+        endedAtTime: '2026-08-26T12:02:00Z',
+      }),
+    )
+    return { g, left, right, fused }
+  }
+
+  it('材料は全部 used に入り、系譜は両方をたどる', () => {
+    const { g, left, right, fused } = merged()
+    const activity = g.activityThatGenerated(fused.id)
+    expect(activity?.used.sort()).toEqual([left.id, right.id].sort())
+    // lineage は全親を辿るので、借りてきた側の Activity も鎖に入る
+    expect(g.lineage(fused.id)).toHaveLength(3)
+  })
+
+  it('会話は分岐元だけをたどる。借りてきても合流しない', () => {
+    const { g, left, right, fused } = merged()
+    // ここが D-021 の肝。used[0] を見ていた頃は、並び順しだいでどちらにも寄った
+    expect(g.rootOf(fused.id)).toBe(left.id)
+    expect(g.session(left.id).map((e) => e.id)).toContain(fused.id)
+    expect(g.session(right.id).map((e) => e.id)).not.toContain(fused.id)
+    // 会話は 2 つのまま。1 枚借りただけで無関係な会話がまるごと合流しない
+    expect(g.roots()).toHaveLength(2)
+  })
+
+  it('分岐元が無い版は、これまでどおり最初の親をたどる', () => {
+    const g = new ProvGraph()
+    const root = g.recordGeneration(base({ image: bytes('plain-root') }))
+    const child = g.recordGeneration(
+      base({ image: bytes('plain-child'), seed: 5, derivedFrom: [root.id] }),
+    )
+    expect(g.rootOf(child.id)).toBe(root.id)
+  })
+})

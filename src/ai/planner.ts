@@ -59,6 +59,8 @@ export class SynthesisForbiddenError extends Error {
 export interface PlanningContext {
   hasSourceImage: boolean
   hasEditRegion: boolean
+  /** 材料として別の画像を足したか（D-021）。足したなら融合しかない */
+  hasExtraSources?: boolean
   /**
    * 画素を作る操作（`pixelOrigin: 'synthesized'`）を禁じるか（D-020）。
    * **実行してからではなく、計画の段階で拒む**——実行時に止めると、
@@ -113,6 +115,9 @@ export function validateImagePlan(
   }
   if (spec.requiresEditRegion && !context.hasEditRegion) {
     throw new Error(`${tool}には利用者が指定した編集範囲が必要です`)
+  }
+  if (spec.requiresExtraSources && !context.hasExtraSources) {
+    throw new Error(`${tool}には材料として足した別の画像が必要です`)
   }
   if (context.forbidSynthesis && spec.pixelOrigin === 'synthesized') {
     throw new SynthesisForbiddenError(
@@ -197,6 +202,10 @@ export function validateImagePlan(
 function explicitRule(intent: string, context: PlanningContext): ImageOperationPlan | undefined {
   if (!context.hasSourceImage) {
     return { tool: 'image.generate', arguments: {}, reason: '編集元画像がないため新規生成' }
+  }
+  // 材料を足したのは画面の操作。他のツールを選ぶと、足した画像が黙って捨てられる（D-021）
+  if (context.hasExtraSources) {
+    return { tool: 'image.compose', arguments: {}, reason: '材料として別の画像を足した指示' }
   }
   if (
     context.hasEditRegion &&

@@ -20,6 +20,8 @@ export interface FlowNodeData {
   iri?: Iri
   /** 指示ノードのみ。その送信から走った本数 */
   branches?: number
+  /** 別の会話から材料として借りてきた版か（D-021） */
+  borrowed?: boolean
   [key: string]: unknown
 }
 
@@ -117,6 +119,32 @@ export function toFlow(
         branches: activities.filter((a) => a.planId === plan.id).length,
       },
     })
+  }
+
+  /**
+   * **会話の外から材料として借りた版**（D-021）。会話は分岐元でたどるので、
+   * 借りた側はこの会話に属さない。だがノードを置かないと辺の端点が欠け、
+   * ELK が例外を投げて**グラフが 1 本も描かれない**（実測）
+   */
+  for (const activity of activities) {
+    for (const used of activity.used) {
+      if (inScope.has(used)) continue
+      const entity = graph.getEntity(used)
+      if (!entity) continue
+      inScope.add(used)
+      nodes.push({
+        id: entity.id,
+        type: 'image',
+        position: { ...at },
+        data: {
+          kind: 'image',
+          label: entity.label,
+          entity,
+          borrowed: true,
+          ...(imageUrlOf(entity) ? { imageUrl: imageUrlOf(entity) } : {}),
+        },
+      })
+    }
   }
 
   const externals = new Set<Iri>()

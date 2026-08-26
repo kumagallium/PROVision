@@ -34,6 +34,7 @@ import { addSoftwareAgent, commandTemplateOf, probeToolEnvironment } from './age
 import { resolveInpaintCommand } from '../image/lama.js'
 import { imageContentDigest, pngDimensions } from '../image/png.js'
 import { MAX_IMPORT_BYTES, baseFileName, importImage } from '../image/import.js'
+import { composeSources } from '../image/compose.js'
 import { promptForImageGeneration } from '../image/prompt.js'
 import { inpaintCacheKeyOf, inpaintImage } from '../image/lama.js'
 import {
@@ -77,6 +78,10 @@ const CACHE_DIR = join(DATA_DIR, 'cache')
 const GRAPH_PATH = join(DATA_DIR, 'lineage.jsonld')
 const PORT = Number(process.env.PROVISION_PORT ?? 8788)
 const IMAGE_EDIT_STRENGTH = 0.3
+
+/** 融合で渡すのは材料を並べた 1 枚。並んだままの絵が返らないよう、そう伝える（D-021） */
+const COMPOSE_HINT =
+  'The input image is a montage of the source images placed side by side. Merge them into one coherent image, not a collage.'
 const MAX_CONDITIONING_IMAGE_BYTES = 12 * 1024 * 1024
 
 await mkdir(IMAGE_DIR, { recursive: true })
@@ -292,6 +297,18 @@ function decodeImageDataUrl(value: string): Uint8Array {
   return new Uint8Array(Buffer.from(match[1]!, 'base64'))
 }
 
+/** 材料を横に並べた 1 枚を保存する（D-021）。確定的なので同じ材料なら同じファイルになる */
+async function storeComposedImage(sources: readonly SourceImage[]): Promise<SourceImage> {
+  const png = await composeSources({
+    paths: sources.map((item) => item.path),
+    digests: sources.map((item) => item.digest),
+  })
+  const digest = imageContentDigest(png)
+  const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
+  if (!existsSync(path)) await writeFile(path, png)
+  return { path, digest }
+}
+
 async function storePngDataUrl(dataUrl: string): Promise<SourceImage> {
   const bytes = decodePngDataUrl(dataUrl)
   const digest = imageContentDigest(bytes)
@@ -497,7 +514,12 @@ interface GenerateBody {
   label?: string
   /** 1 回の送信で出す候補の数（D-018）。1〜MAX_VARIANTS */
   variants?: number
+  /** 材料として足す別の画像（D-021）。parent と合わせて融合する */
+  extraParents?: string[]
 }
+
+/** 一度に足せる材料の数。parent と合わせて 4 枚まで */
+const MAX_EXTRA_SOURCES = 3
 
 /**
  * 「この版はこのデータに基づく」と後から表明する。
@@ -801,7 +823,23 @@ app.post('/api/generate', async (c) => {
   }
 
   try {
+    /**
+     * 材料として足した別の画像（D-021）。**先頭は利用者が居た版**で、そこから
+     * 分岐したことになる。並び順は畳むときの左右にもなる
+     */
+    const extraParents = [
+      ...new Set((Array.isArray(body.extraParents) ? body.extraParents : []).map(String)),
+    ]
+      .filter((id) => id && id !== body.parent)
+      .slice(0, MAX_EXTRA_SOURCES)
+    if (extraParents.length > 0 && !body.parent) {
+      return c.json({ error: '材料を足すには、まず版を選んでください' }, 400)
+    }
+    for (const id of extraParents) {
+      if (!graph.getEntity(id)) return c.json({ error: `その版はグラフにありません: ${id}` }, 400)
+    }
     const source = body.parent ? sourceImageOf(body.parent) : undefined
+    const extraSources = extraParents.map((id) => sourceImageOf(id))
     if ((body.maskedImage || body.maskImage) && !source) {
       return c.json({ error: '編集範囲を指定するには親画像が必要です' }, 400)
     }
@@ -824,6 +862,7 @@ app.post('/api/generate', async (c) => {
       context: {
         hasSourceImage: Boolean(source),
         hasEditRegion: Boolean(body.maskImage),
+        hasExtraSources: extraSources.length > 0,
         forbidSynthesis: (await readPolicy()).forbidSynthesis,
         // 画素からは分からない「この絵の作られ方」を渡す
         ...(parentActivity?.selectedTool
@@ -840,12 +879,22 @@ app.post('/api/generate', async (c) => {
     const useInpainting = plan.tool === 'image.erase'
     const maskImage =
       useInpainting && body.maskImage ? await storePngDataUrl(body.maskImage) : undefined
+    /**
+     * 融合はモデルへ 1 枚しか渡せない（D-021）。材料は全部 `used` に残したまま、
+     * 横に並べた 1 枚を作って渡す。**実際に渡した 1 枚は conditioningImage に残る**ので、
+     * 記録から同じ絵を作り直せる（D-002）
+     */
+    const composed =
+      plan.tool === 'image.compose' && source && extraSources.length > 0
+        ? await storeComposedImage([source, ...extraSources])
+        : undefined
     const conditioningImage =
-      plan.tool === 'image.edit'
+      composed ??
+      (plan.tool === 'image.edit'
         ? body.maskedImage
           ? await storePngDataUrl(body.maskedImage)
           : source
-        : undefined
+        : undefined)
     const inpaintInput =
       useInpainting && source && maskImage
         ? {
@@ -894,7 +943,11 @@ app.post('/api/generate', async (c) => {
     // 候補を複数出すときは、ここからばらす（D-018）
     const basePrompt = useInpainting
       ? 'Inpaint the masked region using the surrounding image.'
-      : plan.tool === 'image.generate' || plan.tool === 'image.edit'
+      : plan.tool === 'image.compose'
+        ? body.prompt?.trim() ||
+          // 渡すのは材料を横に並べた 1 枚。そう言わないと、並んだままの絵が返る
+          `${COMPOSE_HINT} ${plan.prompt ?? instruction}`
+        : plan.tool === 'image.generate' || plan.tool === 'image.edit'
         ? body.prompt?.trim() ||
           promptForImageGeneration(
             parentActivity?.prompt,
@@ -905,7 +958,10 @@ app.post('/api/generate', async (c) => {
             plan.arguments.text,
           )
         : instruction
-    const usesImageModel = plan.tool === 'image.generate' || plan.tool === 'image.edit'
+    const usesImageModel =
+      plan.tool === 'image.generate' ||
+      plan.tool === 'image.edit' ||
+      plan.tool === 'image.compose'
 
     /**
      * 候補の数（D-018）。**画像モデルを使う手だけ**に効く。確定的なツールで枚数を
@@ -1054,10 +1110,12 @@ app.post('/api/generate', async (c) => {
               // 実際に使った値を記録する。mflux 側の既定と必ず同じものを指す（D-002）
               ...(usesImageModel ? { steps: DEFAULT_STEPS } : {}),
               ...(dimensions ? dimensions : {}),
-              ...(plan.tool === 'image.edit' && source
+              ...((plan.tool === 'image.edit' || plan.tool === 'image.compose') && source
                 ? { imageStrength: IMAGE_EDIT_STRENGTH }
                 : {}),
-              ...(plan.tool === 'image.edit' && body.maskedImage && conditioningImage
+              ...((plan.tool === 'image.compose' ||
+                (plan.tool === 'image.edit' && body.maskedImage)) &&
+              conditioningImage
                 ? {
                     conditioningImageDigest: conditioningImage.digest,
                     conditioningImageLocation: `images/${conditioningImage.digest.slice(0, 16)}.png`,
@@ -1091,7 +1149,9 @@ app.post('/api/generate', async (c) => {
               startedAtTime: result.startedAtTime,
               endedAtTime: result.endedAtTime,
               ...(body.intent?.trim() ? { intent: body.intent } : {}),
-              ...(body.parent ? { derivedFrom: [body.parent] } : {}),
+              // 材料は全部 used に入れる。会話をたどるのは利用者が居た版（D-021）
+              ...(body.parent ? { derivedFrom: [body.parent, ...extraParents] } : {}),
+              ...(body.parent && extraParents.length > 0 ? { branchedFrom: body.parent } : {}),
               ...(body.referenced?.length ? { referenced: body.referenced } : {}),
               agents: [
                 executorAgent(plan.tool).id,
