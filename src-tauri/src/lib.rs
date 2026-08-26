@@ -177,10 +177,24 @@ fn start_sidecar(
     let data_dir = workspace_dir(&app)?;
     log(format!("[sidecar] data: {}", data_dir.display()));
 
+    // 設定は成果物と別の場所へ置く。Documents は TCC 保護対象で、**署名が変わると
+    // 過去の許可が落ちる**——リリースのたびに署名は変わるので、更新直後に設定を
+    // 読めない状態で起動しうる。そのとき「設定が無い」と区別できず、AI モデルの
+    // 登録が消えたように見えていた。Application Support は TCC 保護外なので、
+    // 利用者が直接開かない設定はこちらに置く（Graphium が同じ理由で移している）
+    let config_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("設定の置き場を解決できません: {e}"))?;
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("{} を作れません: {e}", config_dir.display()))?;
+    log(format!("[sidecar] config: {}", config_dir.display()));
+
     let mut cmd = Command::new(&node);
     cmd.arg(&script)
         .env("PROVISION_PORT", port.to_string())
         .env("PROVISION_DATA_DIR", &data_dir)
+        .env("PROVISION_CONFIG_DIR", &config_dir)
         // 本体が消えたら自決させるための目印
         .env("PROVISION_PARENT_PID", std::process::id().to_string())
         .env("PROVISION_APP_VERSION", app.package_info().version.to_string())
