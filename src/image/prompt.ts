@@ -99,16 +99,21 @@ export function promptForImageGeneration(
       ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),
       scope === 'whole'
         ? 'Redraw the artwork in the requested style; it is expected to look different from the input.'
-        : 'Preserve the existing symbol, composition, colors, and geometry.',
+        : 'Do not change anything the instruction does not ask you to change.',
       'Render the lettering cleanly and legibly, matching the existing style.',
     ].join(' ')
   }
 
   /**
-   * **保存を求める文を、作り替えの依頼へ付けてはいけない**（D-023）。
-   * 「シンプルにして」の直後に「既存の要素・構図・色・形をすべて保て」と書くと
-   * 自己矛盾し、モデルは保存の方に従う（実測: 絵がほとんど変わらなかった）。
-   * 文字追加へ「Do not add any text」を付けたときと同じ失敗である。
+   * **保存を求める文は条件形で書く**（D-023）。
+   *
+   * 絶対形（`Preserve all existing visual elements, composition, colors, and geometry`）は
+   * 「シンプルにして」のような作り替えの依頼と**正面から矛盾する**。`unless explicitly
+   * changed` を付けても、モデルは前半の強い命令に従った（実測 2 回）。
+   *
+   * 条件形——「指示が求めていないものは変えるな」——は、**どんな指示とも矛盾しない**。
+   * 「フラットにして」ならフラットにすることが指示なので衝突せず、「余白を広げて」なら
+   * 余白以外は変えないと読める。**範囲の判定を外しても壊れない**のはこの形だけである。
    */
   return [
     'Edit the input image according to this instruction:',
@@ -119,9 +124,7 @@ export function promptForImageGeneration(
           'Redraw the whole image in the requested style. It is expected to look clearly different from the input.',
           'Keep the subject and what it depicts, but the composition, level of detail, and rendering style may change.',
         ]
-      : [
-          'Preserve all existing visual elements, composition, colors, and geometry unless explicitly changed.',
-        ]),
+      : ['Do not change anything the instruction does not ask you to change.']),
     'Do not add any text, logo, brand name, or watermark unless explicitly requested.',
   ].join(' ')
 }

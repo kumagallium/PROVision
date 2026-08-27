@@ -936,6 +936,8 @@ app.post('/api/generate', async (c) => {
       planner: await plannerCredentials(CONFIG_DIR),
     })
     const plan = planning.plan
+    // 保存を求める文は条件形なので外しても壊れないが、作り替えは強く促したい（D-023）
+    const editScope = editScopeOf(plan, instruction)
     const useInpainting = plan.tool === 'image.erase'
     const maskImage =
       useInpainting && body.maskImage ? await storePngDataUrl(body.maskImage) : undefined
@@ -1016,8 +1018,8 @@ app.post('/api/generate', async (c) => {
             Boolean(source),
             Boolean(body.maskedImage),
             plan.arguments.text,
-            // 作り替えの依頼へ保存を求めると自己矛盾し、絵が変わらない（D-023）
-            editScopeOf(plan, instruction),
+            // 保存を求める文は条件形。範囲は「作り替えを強く促すか」の判断（D-023）
+            editScope.scope,
           )
         : instruction
     const usesImageModel =
@@ -1244,6 +1246,8 @@ app.post('/api/generate', async (c) => {
         tool: plan.tool,
         arguments: plan.arguments,
         variants: entities.length,
+        // 外したときにどちらを直せばよいか分かるよう、決めた側も返す（D-023）
+        ...(usesImageModel ? { scope: editScope.scope, scopeSource: editScope.source } : {}),
         ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
         ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
         ...(planning.warning || notices.length > 0

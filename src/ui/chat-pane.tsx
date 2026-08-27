@@ -138,7 +138,13 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
         | {
             entity: { id: string }
             graph: ProvJsonLdDocument
-            routing?: { mode: 'rules' | 'llm'; tool: string; warning?: string }
+            routing?: {
+              mode: 'rules' | 'llm'
+              tool: string
+              warning?: string
+              scope?: 'local' | 'whole'
+              scopeSource?: 'planner' | 'rules'
+            }
           }
         | { error: string }
       if (!res.ok || 'error' in body) {
@@ -148,9 +154,13 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
       onSelect(body.entity.id)
       if (body.routing) {
         const source = body.routing.mode === 'llm' ? 'AI' : '規則'
+        // 範囲を外したときに、どちらを直せばよいか分かるようにする（D-023）
+        const scope =
+          body.routing.scope === 'whole'
+            ? `全体の作り替えとして扱いました（${body.routing.scopeSource === 'planner' ? 'AI' : '規則'}の判断）。`
+            : ''
         setRoutingNotice(
-          body.routing.warning ??
-            `${source}が ${body.routing.tool} を選びました。`,
+          body.routing.warning ?? `${source}が ${body.routing.tool} を選びました。${scope}`,
         )
       }
       setEditRegion(null)
@@ -262,6 +272,28 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
                           style={{ display: 'block', width: '100%' }}
                         />
                       </button>
+                      {shown.length === 1 && act && act.prompt !== a.intent ? (
+                        /**
+                         * **実行された全文は毎回ここに出す。** 頼んだこと（intent）と
+                         * 実行されたこと（prompt）は別々に記録している（D-003）のに、
+                         * 候補が複数のときしか出していなかった。1 枚のときこそ、
+                         * 書き直しが入ったかどうかが分からない
+                         */
+                        <div
+                          title={act.prompt}
+                          style={{
+                            fontSize: 10,
+                            color: '#8b98a1',
+                            padding: '4px 1px 0',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 3,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {act.prompt}
+                        </div>
+                      ) : null}
                       {shown.length > 1 && act ? (
                         <div style={{ fontSize: 10, color: '#8b98a1', padding: '3px 1px 0' }}>
                           seed {act.seed}
