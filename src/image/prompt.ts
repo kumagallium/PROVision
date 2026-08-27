@@ -51,7 +51,7 @@ export type EditScope = 'local' | 'whole'
  * 判断そのものは指示を読んだ側（プランナー）がやるほうが確かである。
  */
 const WHOLE_IMAGE_TERMS =
-  /(抽象化|抽象的|シンプル|簡素|簡略|フラット|ミニマル|作り直|描き直|書き直|画風|様式|テイスト|大胆|全面的|全体的|simplif|abstract|flat|minimal|redesign|redraw|rework|restyle|bolder)/i
+  /(抽象化|抽象的|シンプル|簡素|簡略|フラット|ベタ|平面|線画|絵柄|画風|様式|テイスト|イラスト調|ミニマル|作り直|描き直|書き直|大胆|全面的|全体的|simplif|abstract|flat|minimal|solid\s+(colou?r|illustration)|line\s*art|redesign|redraw|rework|restyle|bolder)/i
 
 export function isWholeImageIntent(intent: string): boolean {
   return WHOLE_IMAGE_TERMS.test(intent)
