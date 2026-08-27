@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.13](https://github.com/kumagallium/PROVision/compare/v0.2.12...v0.2.13) - 2026-08-27
+
+- fix(image): 作り替えの判定を書き直し文にも当てる by @kumagallium in https://github.com/kumagallium/PROVision/pull/38
+
 ## [v0.2.12](https://github.com/kumagallium/PROVision/compare/v0.2.11...v0.2.12) - 2026-08-26
 
 - fix(ui): 過去の会話でノードが重なるのと、生成後にグラフが空になるのを直す by @kumagallium in https://github.com/kumagallium/PROVision/pull/36
