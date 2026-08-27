@@ -254,10 +254,20 @@ export function validateImagePlan(
  * 「作り替えを頼む文に、保存を求める文を並べない」ことだけで、余計な保存句を外す方向に
  * しか動かさない。
  */
-export function editScopeOf(plan: ImageOperationPlan, intent: string): EditScope {
-  if (plan.scope === 'whole') return 'whole'
-  const whole = isWholeImageIntent(intent) || isWholeImageIntent(plan.prompt ?? '')
-  return whole ? 'whole' : (plan.scope ?? 'local')
+export interface EditScopeDecision {
+  scope: EditScope
+  /** 誰が決めたか。**外したときに、どちらを直せばよいか分かる形にしておく** */
+  source: 'planner' | 'rules'
+}
+
+export function editScopeOf(plan: ImageOperationPlan, intent: string): EditScopeDecision {
+  if (plan.scope === 'whole') return { scope: 'whole', source: 'planner' }
+  if (isWholeImageIntent(intent) || isWholeImageIntent(plan.prompt ?? '')) {
+    return { scope: 'whole', source: 'rules' }
+  }
+  return plan.scope
+    ? { scope: plan.scope, source: 'planner' }
+    : { scope: 'local', source: 'rules' }
 }
 
 function explicitRule(intent: string, context: PlanningContext): ImageOperationPlan | undefined {
@@ -629,7 +639,7 @@ export async function planImageOperation(input: {
     'When the user asks to add lettering (wordmark/logotype), set arguments.text to the exact string (<=40 chars). Take it from the instruction, or from the lineage when the instruction does not name it. Omit arguments.text when no name is available anywhere.',
     'Context.parentTool is the tool that produced the current picture, and Context.parentText is the lettering it drew. When parentTool is image.wordmark and the user wants to change the gap, margin, or spacing around that lettering, choose image.wordmark again: set arguments.text to Context.parentText and arguments.padding in pixels (roughly 8 for tight, 24 for default, 60 for airy). The band is rebuilt from the artwork underneath, so nothing is lost. Do not use image.edit for that — the diffusion model repaints everything and drops the lettering.',
     'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
-    'Also set "scope" for those two tools: "whole" when the instruction asks to restyle, simplify, abstract, flatten, redraw as a flat or solid illustration, change the art style, or otherwise remake the entire picture; "local" only when it changes one part or detail (a margin, one colour, one element). This decides whether the image model is told to preserve the existing composition — telling it to preserve everything while asking for a restyle contradicts itself, and the picture comes back unchanged.',
+    'Also set "scope" for those two tools: "whole" when the instruction asks to restyle, simplify, abstract, flatten, redraw as a flat or solid illustration, change the art style, or otherwise remake the entire picture; "local" only when it changes one part or detail (a margin, one colour, one element). This decides whether the image model is told to redraw the whole picture. Getting it wrong no longer breaks the edit, but a restyle comes out weaker when it is marked "local".',
     'Examples of "whole": make it flat, make it simpler, abstract it, turn it into a line drawing, change the art style. Examples of "local": widen the margin, make the lettering smaller, change the background colour.',
     'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
     'If arguments.text is set, the rewritten prompt must contain that exact string.',

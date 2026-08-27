@@ -544,7 +544,7 @@ describe('編集の範囲（D-023）', () => {
     )
     expect(plan.scope).toBe('whole')
     // 指示の言葉が何であれ、答えた側を優先する
-    expect(editScopeOf(plan, 'もう少し余白を取って')).toBe('whole')
+    expect(editScopeOf(plan, 'もう少し余白を取って').scope).toBe('whole')
   })
 
   it('答えなかったら指示の言葉から当てる', () => {
@@ -553,8 +553,12 @@ describe('編集の範囲（D-023）', () => {
       { hasSourceImage: true, hasEditRegion: false },
     )
     expect(plan.scope).toBeUndefined()
-    expect(editScopeOf(plan, '同じ方向性で抽象化をしてほしい')).toBe('whole')
-    expect(editScopeOf(plan, 'もう少し余白を取って')).toBe('local')
+    expect(editScopeOf(plan, '同じ方向性で抽象化をしてほしい')).toEqual({
+      scope: 'whole',
+      source: 'rules',
+    })
+    // 決めた側も返す。外したときにどちらを直せばよいか分かるようにするため
+    expect(editScopeOf(plan, 'もう少し余白を取って')).toEqual({ scope: 'local', source: 'rules' })
   })
 
   it('知らない値は載せない。語彙の外を通さない', () => {
@@ -597,7 +601,7 @@ describe('編集の範囲を書き直し文からも当てる（D-023）', () =>
         { tool: 'image.edit', arguments: {}, prompt },
         { hasSourceImage: true, hasEditRegion: false },
       )
-      expect(editScopeOf(plan, intent), intent).toBe('whole')
+      expect(editScopeOf(plan, intent).scope, intent).toBe('whole')
     }
   })
 
@@ -612,7 +616,7 @@ describe('編集の範囲を書き直し文からも当てる（D-023）', () =>
       },
       { hasSourceImage: true, hasEditRegion: false },
     )
-    expect(editScopeOf(plan, 'ベタッとしたイラストに')).toBe('whole')
+    expect(editScopeOf(plan, 'ベタッとしたイラストに').scope).toBe('whole')
   })
 
   it('一部を直す依頼は local のまま', () => {
@@ -624,6 +628,6 @@ describe('編集の範囲を書き直し文からも当てる（D-023）', () =>
       },
       { hasSourceImage: true, hasEditRegion: false },
     )
-    expect(editScopeOf(plan, 'もう少し余白を取って')).toBe('local')
+    expect(editScopeOf(plan, 'もう少し余白を取って').scope).toBe('local')
   })
 })

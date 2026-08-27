@@ -104,7 +104,7 @@ describe('全体を作り替える依頼（D-023）', () => {
     }
   })
 
-  it('一部を直す依頼では、これまでどおり保存を求める', () => {
+  it('一部を直す依頼では、指示の外を変えるなと伝える', () => {
     const prompt = promptForImageGeneration(
       'a rich isometric icon',
       'もう少し余白を取って',
@@ -113,13 +113,25 @@ describe('全体を作り替える依頼（D-023）', () => {
       undefined,
       'local',
     )
-    expect(prompt).toContain(PRESERVE)
+    expect(prompt).toContain('Do not change anything the instruction does not ask you to change')
   })
 
   it('既定は local。範囲が分からないのに作り替えさせない', () => {
     expect(
       promptForImageGeneration('a rich isometric icon', 'もう少し余白を取って', true),
-    ).toContain(PRESERVE)
+    ).toContain('Do not change anything the instruction does not ask you to change')
+  })
+
+  it('**保存を求める文は絶対形で書かない。** 範囲を外しても矛盾しない形にする', () => {
+    // 範囲の判定を外したとき（作り替えの依頼を local と見た）でも、
+    // 文どうしが打ち消し合わないことがこの決定の肝（D-023）
+    for (const scope of ['local', 'whole'] as const) {
+      for (const intent of ['ベタッとしたイラストにして', 'もう少し余白を取って']) {
+        const prompt = promptForImageGeneration('a rich icon', intent, true, false, undefined, scope)
+        expect(prompt, `${scope} / ${intent}`).not.toContain(PRESERVE)
+        expect(prompt).not.toContain('Preserve the existing symbol')
+      }
+    }
   })
 
   it('指示の言葉から当てる（LLM が答えなかったときの受け皿）', () => {
