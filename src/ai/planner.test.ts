@@ -573,3 +573,57 @@ describe('編集の範囲（D-023）', () => {
     expect(plan.scope).toBeUndefined()
   })
 })
+
+describe('編集の範囲を書き直し文からも当てる（D-023）', () => {
+  /** 実測でつまずいた指示と、そのとき実際に走った書き直し文 */
+  const real = [
+    {
+      intent: 'かなりリッチな画像なので、ベタッとしたイラストにしてください',
+      prompt: 'Convert the existing rich logo into a flat, solid illustration style.',
+    },
+    {
+      intent: '同じ方向性で抽象化をしてほしい',
+      prompt: 'Create a more abstract version of the existing logo, preserving its conceptual direction.',
+    },
+    {
+      intent: 'シンプルなフラットデザインのロゴにしてくれますか',
+      prompt: 'Create a simple flat design logo based on the existing rich illustration.',
+    },
+  ]
+
+  it('利用者の言い回しで拾えなくても、書き直し文で拾う', () => {
+    for (const { intent, prompt } of real) {
+      const plan = validateImagePlan(
+        { tool: 'image.edit', arguments: {}, prompt },
+        { hasSourceImage: true, hasEditRegion: false },
+      )
+      expect(editScopeOf(plan, intent), intent).toBe('whole')
+    }
+  })
+
+  it('プランナーが local と答えても、作り替えの文なら上げる', () => {
+    // ここでやっているのは「矛盾する保存句を外す」ことだけなので、上げる方向にしか動かさない
+    const plan = validateImagePlan(
+      {
+        tool: 'image.edit',
+        arguments: {},
+        scope: 'local',
+        prompt: 'Convert the existing rich logo into a flat, solid illustration style.',
+      },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(editScopeOf(plan, 'ベタッとしたイラストに')).toBe('whole')
+  })
+
+  it('一部を直す依頼は local のまま', () => {
+    const plan = validateImagePlan(
+      {
+        tool: 'image.edit',
+        arguments: {},
+        prompt: 'Widen the margin around the artwork slightly.',
+      },
+      { hasSourceImage: true, hasEditRegion: false },
+    )
+    expect(editScopeOf(plan, 'もう少し余白を取って')).toBe('local')
+  })
+})
