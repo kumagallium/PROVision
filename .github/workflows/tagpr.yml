@@ -21,10 +21,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # TAGPR_TOKEN があればそれを使う。無ければ GITHUB_TOKEN のまま（挙動は変わらない）。
+      #
+      # GITHUB_TOKEN で作った PR には、GitHub の no-recursion 制約で workflow が走らない。
+      # リリース PR の Test が「ジョブ 0 件のまま失敗」と出るのはこれで、**中身が
+      # 落ちているわけではない**（マージ後の main では同じ内容が通っている）。
+      # 赤い印を消し、リリース PR そのものを検査したいなら、PAT か GitHub App の
+      # トークンを TAGPR_TOKEN として置く。置かないままでも困らない
       - uses: Songmu/tagpr@d1b8138b7a31075141b6cd64103de9485ced7ac9 # v1.20.1
         id: tagpr
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TAGPR_TOKEN || secrets.GITHUB_TOKEN }}
 
       # タグが打たれた回だけ、デスクトップのビルドを明示的に起こす。
       # tagpr は GITHUB_TOKEN で push するので、GitHub の no-recursion 制約により
