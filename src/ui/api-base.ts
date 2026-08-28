@@ -15,8 +15,23 @@
  */
 export const SIDECAR_PORT = 8788
 
-/** 既定が塞がっていたときに試す先。5 つ試して駄目なら諦めて理由を出す */
+/**
+ * **受け皿**の候補（D-024）。ふだんは使わない——OS に空きを選ばせるのが本筋で、
+ * ここへ落ちるのは、起動したサーバがポートを名乗らなかったときだけである
+ */
 const PORT_CANDIDATES = [SIDECAR_PORT, 8789, 8790, 8791, 8792]
+
+/** サーバが起動時に出す行。ここから**実際に割り当てられたポート**を読む */
+const PORT_LINE = /PROVision server: http:\/\/127\.0\.0\.1:(\d+)/
+
+/**
+ * サイドカーの出力 1 行から、割り当てられたポートを読む（D-024）。
+ * **番号を決めるのは OS で、こちらは聞き取るだけ**である
+ */
+export function portFromSidecarLog(line: string): number | undefined {
+  const found = PORT_LINE.exec(line)
+  return found ? Number(found[1]) : undefined
+}
 
 /** 実際に使えたポート。ensureSidecar が決めるまでは既定を指す */
 let activePort = SIDECAR_PORT
@@ -97,6 +112,21 @@ export async function ensureSidecar(timeoutMs = 30_000): Promise<void> {
   if (!isTauri()) return
   const { invoke } = await import('@tauri-apps/api/core')
 
+  /**
+   * **ポートは OS に選ばせる。** 候補を並べて当てにいく形だと、その並びが全部
+   * 塞がったときに詰まる——列挙はいつか漏れる（D-024）。0 を渡せば OS が
+   * **空いているポートを保証して**返し、取り合いも競合も起こらない。
+   *
+   * 割り当てられた番号は、サーバが起動時に出す行から読む。Rust 側は子プロセスの
+   * 出力を `sidecar-log` として流しているので、こちらは聞いているだけでよい
+   */
+  const assigned = await startAndLearnPort(invoke, timeoutMs)
+  if (assigned !== undefined && (await isProvisionAt(assigned)) === 'own') {
+    activePort = assigned
+    return
+  }
+
+  // ここから下は受け皿。名乗りが取れなかったときだけ通る
   const occupied: number[] = []
   for (const port of PORT_CANDIDATES) {
     const who = await isProvisionAt(port)
@@ -127,4 +157,37 @@ export async function ensureSidecar(timeoutMs = 30_000): Promise<void> {
     `ローカルサーバを置けるポートがありません（${occupied.join(', ')} は別のアプリが使っています）。` +
       'そのアプリを止めてから開き直してください',
   )
+}
+
+/**
+ * ポートを OS に選ばせて起動し、割り当てられた番号を受け取る（D-024）。
+ * 名乗りが取れなければ undefined を返し、呼び側が受け皿へ回る。
+ */
+async function startAndLearnPort(
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
+  timeoutMs: number,
+): Promise<number | undefined> {
+  try {
+    const { listen } = await import('@tauri-apps/api/event')
+    let announce: (port: number) => void = () => undefined
+    const heard = new Promise<number>((resolve) => {
+      announce = resolve
+    })
+    const stop = await listen<string>('sidecar-log', (event) => {
+      const found = portFromSidecarLog(String(event.payload))
+      if (found !== undefined) announce(found)
+    })
+    try {
+      // 0 を渡す＝OS に選ばせる
+      await invoke('start_sidecar', { port: 0 })
+      return await Promise.race([
+        heard,
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
+      ])
+    } finally {
+      stop()
+    }
+  } catch {
+    return undefined
+  }
 }
