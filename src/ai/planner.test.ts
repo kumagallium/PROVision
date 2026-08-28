@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  MAX_REWRITTEN_PROMPT_LENGTH,
   MAX_VARIANTS,
   SynthesisForbiddenError,
   asksForMultipleCandidates,
   editScopeOf,
+  needsTranslation,
   planImageOperation,
   proposeVariantPrompts,
   ruleBasedPlan,
@@ -200,6 +202,117 @@ describe('画像ツールプランナー', () => {
     expect(planned.mode).toBe('rules')
     expect(planned.plan.tool).toBe('image.edit')
     expect(planned.warning).toContain('未対応')
+  })
+
+  it('訳し漏れを清書の失敗として扱う', () => {
+    expect(needsTranslation('弓矢を無くして、色も1色にして')).toBe(true)
+    expect(needsTranslation('Remove the bow and arrow. No bow, no arrow.')).toBe(false)
+    // 描く文字列が日本語なら、それは訳し漏れではない
+    expect(needsTranslation('Add the wordmark "星座" below the symbol.', '星座')).toBe(false)
+  })
+
+  it('清書が欠けたら、清書だけを頼み直して埋める', async () => {
+    // 実測: 振り分けは image.edit で当たっていたのに prompt が無く、
+    // 「弓矢を無くして、使う色も１色にした…」がそのまま画像モデルへ渡っていた
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json({
+          choices: [
+            { message: { content: '{"tool":"image.edit","arguments":{},"reason":"restyle"}' } },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"prompt":"Redraw the emblem as a flat vector illustration in a single blue. No bow, no arrow anywhere."}',
+              },
+            },
+          ],
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const planned = await planImageOperation({
+      intent: '弓矢を無くして、使う色も１色にしたシンプル板が欲しい',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      planner: {
+        enabled: true,
+        provider: 'openai-compatible',
+        modelId: 'gpt-oss-120b',
+        apiBase: 'https://example.invalid/v1',
+        apiKey: 'k',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(planned.plan.tool).toBe('image.edit')
+    expect(planned.plan.prompt).toContain('No bow, no arrow')
+    expect(planned.warning).toBeUndefined()
+  })
+
+  it('頼み直しにも失敗したら、計画は残して警告だけ出す', async () => {
+    // 選ばれたツールは当たっている。計画ごと捨てると別のツールが動く（D-013）
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: '{"tool":"image.edit","arguments":{},"reason":"restyle"}',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const planned = await planImageOperation({
+      intent: '弓矢を無くして',
+      context: { hasSourceImage: true, hasEditRegion: false },
+      planner: {
+        enabled: true,
+        provider: 'openai-compatible',
+        modelId: 'gpt-oss-120b',
+        apiBase: 'https://example.invalid/v1',
+        apiKey: 'k',
+      },
+    })
+    expect(planned.plan.tool).toBe('image.edit')
+    expect(planned.plan.prompt).toBeUndefined()
+    expect(planned.warning).toContain('書き直せなかった')
+  })
+
+  it('曖昧語を開いた長い清書を通す。弾くのは上限を超えたときだけ', () => {
+    const long = `Redraw it as a flat vector illustration. ${'Keep the circular layout. '.repeat(
+      25,
+    )}`.trim()
+    expect(long.length).toBeGreaterThan(600)
+    expect(
+      validateImagePlan(
+        { tool: 'image.edit', arguments: {}, reason: 'restyle', prompt: long },
+        { hasSourceImage: true, hasEditRegion: false },
+      ).prompt,
+    ).toBe(long)
+    expect(() =>
+      validateImagePlan(
+        {
+          tool: 'image.edit',
+          arguments: {},
+          reason: 'restyle',
+          prompt: 'x'.repeat(MAX_REWRITTEN_PROMPT_LENGTH + 1),
+        },
+        { hasSourceImage: true, hasEditRegion: false },
+      ),
+    ).toThrow(/900文字以内/)
   })
 
   it('書き直しプロンプトを検証して採用する', async () => {
