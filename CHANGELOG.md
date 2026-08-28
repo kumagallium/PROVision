@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.15](https://github.com/kumagallium/PROVision/compare/v0.2.14...v0.2.15) - 2026-08-28
+
+- fix(ui): ポートが塞がっていても起動できるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/47
+
 ## [v0.2.14](https://github.com/kumagallium/PROVision/compare/v0.2.13...v0.2.14) - 2026-08-27
 
 - fix(image): 保存を求める文を条件形にして、判定を外しても壊れないようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/40
