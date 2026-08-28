@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.16](https://github.com/kumagallium/PROVision/compare/v0.2.15...v0.2.16) - 2026-08-28
+
+- fix(ui): ポートを OS に選ばせる by @kumagallium in https://github.com/kumagallium/PROVision/pull/49
+
 ## [v0.2.15](https://github.com/kumagallium/PROVision/compare/v0.2.14...v0.2.15) - 2026-08-28
 
 - fix(ui): ポートが塞がっていても起動できるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/47
