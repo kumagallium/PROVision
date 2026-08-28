@@ -62,13 +62,43 @@ function keychainEnabled(): boolean {
   return process.platform === 'darwin' && process.env.PROVISION_USE_KEYCHAIN === '1'
 }
 
+/**
+ * `security` を待つ上限。**必ず付ける**。
+ *
+ * `execFileSync` は Node のイベントループごと止める。Keychain が応答しないと
+ * **サーバ全体が固まり**、画面はどこも読み込み中のまま返ってこない（実測）。
+ * 応答が無いのは異常なので、待ち続けるより「取れなかった」として先へ進めるほうがよい
+ */
+const SECURITY_TIMEOUT_MS = 5_000
+
+/**
+ * その項目が**あるか**だけ見る。**値は読まない。**
+ *
+ * `-w`（値の取り出し）は Keychain の許可を求める。署名が変わった直後——つまり
+ * 更新した直後——は許可が落ちているので、そこで止まる。**「鍵が入っているか」を
+ * 知りたいだけの場面で値を読んではいけない**（実測: 設定画面が読み込み中のまま止まった）。
+ */
+function hasSecret(account: string): boolean {
+  if (!keychainEnabled()) return (memoryApiKeys.get(account) ?? '').length > 0
+  try {
+    execFileSync(
+      'security',
+      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account],
+      { stdio: 'ignore', timeout: SECURITY_TIMEOUT_MS },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
 function readSecret(account: string): string {
   if (!keychainEnabled()) return memoryApiKeys.get(account) ?? ''
   try {
     return execFileSync(
       'security',
       ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account, '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: SECURITY_TIMEOUT_MS },
     ).replace(/\r?\n$/, '')
   } catch {
     return ''
@@ -86,7 +116,7 @@ function writeSecret(account: string, apiKey: string): void {
       execFileSync(
         'security',
         ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account],
-        { stdio: 'ignore' },
+        { stdio: 'ignore', timeout: SECURITY_TIMEOUT_MS },
       )
     } catch {
       // 既に無ければ削除済みとして扱う
@@ -105,7 +135,7 @@ function writeSecret(account: string, apiKey: string): void {
       '-w',
       apiKey,
     ],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
+    { stdio: ['ignore', 'ignore', 'pipe'], timeout: SECURITY_TIMEOUT_MS },
   )
 }
 
@@ -190,9 +220,12 @@ function normalizeRegistry(value: unknown): AiModelRegistry {
     apiBase: clean(raw.apiBase, 500),
   })
   if (!legacy) return defaultRegistry()
-  const legacyKey = readSecret(LEGACY_KEYCHAIN_ACCOUNT)
   const account = connectionAccount(legacy)
-  if (legacyKey && !readSecret(account)) writeSecret(account, legacyKey)
+  // 移し替えが要るときだけ値を読む。要らない場面で読むと、そこで許可を求められる
+  if (hasSecret(LEGACY_KEYCHAIN_ACCOUNT) && !hasSecret(account)) {
+    const legacyKey = readSecret(LEGACY_KEYCHAIN_ACCOUNT)
+    if (legacyKey) writeSecret(account, legacyKey)
+  }
   return {
     enabled: Boolean(raw.enabled),
     selectedModelId: legacy.id,
@@ -254,7 +287,8 @@ export async function publicAiModelRegistry(
     ...registry,
     models: registry.models.map((model) => ({
       ...model,
-      hasApiKey: readSecret(connectionAccount(model)).length > 0,
+      // **存在だけ見る。** ここで値を読むと Keychain の許可を求めて止まる
+      hasApiKey: hasSecret(connectionAccount(model)),
     })),
     keyStorage: keychainEnabled() ? 'keychain' : 'memory',
   }

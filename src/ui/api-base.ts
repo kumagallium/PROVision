@@ -139,9 +139,10 @@ export async function ensureSidecar(timeoutMs = 30_000): Promise<void> {
       continue
     }
 
-    // 空いていそうなので、ここで起こしてみる
+    // 空いていそうなので、ここで起こしてみる。**候補ごとに丸々待たない**——
+    // 全部外れると待ち時間が積み上がり、画面が固まったように見える（実測: 5 つで 2 分半）
     await invoke('start_sidecar', { port })
-    const deadline = Date.now() + timeoutMs
+    const deadline = Date.now() + Math.min(timeoutMs, 8_000)
     for (;;) {
       if ((await isProvisionAt(port)) === 'own') {
         activePort = port
