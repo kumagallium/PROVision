@@ -22,7 +22,14 @@
     "dialog:default",
     {
       "identifier": "http:default",
+      "comment": "ポートは OS に選ばせる（D-024）ので番号で縛れない。8788 を残すのは、ワイルドカードが効かない環境でも従来どおり動くようにするため",
       "allow": [
+        {
+          "url": "http://127.0.0.1:*/*"
+        },
+        {
+          "url": "http://localhost:*/*"
+        },
         {
           "url": "http://127.0.0.1:8788/*"
         },
