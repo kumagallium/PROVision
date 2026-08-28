@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.19](https://github.com/kumagallium/PROVision/compare/v0.2.18...v0.2.19) - 2026-08-28
+
+- fix(image): 清書を文字消しの定型文で置き換えない by @kumagallium in https://github.com/kumagallium/PROVision/pull/56
+- feat(ui): グラフで「いま見ている版」と「さっき生まれた版」を示す by @kumagallium in https://github.com/kumagallium/PROVision/pull/58
+
 ## [v0.2.18](https://github.com/kumagallium/PROVision/compare/v0.2.17...v0.2.18) - 2026-08-28
 
 - fix(ai): 清書を必須にして、日本語のまま画像モデルへ渡さない by @kumagallium in https://github.com/kumagallium/PROVision/pull/54
