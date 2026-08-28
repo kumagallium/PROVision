@@ -559,6 +559,7 @@ const REWRITE_RULES = [
   'Rewrite faithfully: resolve ambiguity using the lineage and keep every explicit user constraint.',
   'Make vague style words concrete, so the image model has something to act on: "flat" becomes flat vector illustration with solid fills and uniform line weight; "simple" becomes few shapes and a limited palette. Expanding a style word the user did use is required. Adding subjects, objects, moods, or lettering the user never mentioned is not.',
   'State a removal as an explicit absence as well as an action: not only "remove the bow and arrow" but also "no bow, no arrow anywhere in the image".',
+  'Do the same for every other constraint: name everything it covers, and say it both ways. Not "using a single colour" but "one single ink colour; every ring, star and line in that same colour; no second colour, no red, no yellow". A constraint mentioned once in passing is ignored.',
   'Say what must stay recognisable, but never write a blanket "preserve all existing colors and geometry": it cancels the requested change.',
   'Up to 4 sentences. Be specific rather than long.',
 ]
