@@ -360,9 +360,16 @@ const app = new Hono()
  * ポートを握ったまま生き残ると、新しい API が 404 になる——画面はこの版を見て
  * 食い違いに気づける。
  */
+/**
+ * 生存確認。**`app` は「これは PROVision のサーバである」という印**（D-024）。
+ *
+ * 200 が返ったことだけを見て自分のサーバだと決めてはいけない。同じポートを別のアプリが
+ * 握っていると、そちらの画面 HTML が 200 で返り、JSON として読もうとして落ちる（実測）。
+ */
 app.get('/api/health', (c) =>
   c.json({
     ok: true,
+    app: 'provision',
     pid: process.pid,
     version: process.env.PROVISION_APP_VERSION ?? 'dev',
     dataDir: DATA_DIR,
