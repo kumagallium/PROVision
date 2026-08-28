@@ -70,6 +70,12 @@ export function promptForImageGeneration(
   renderText?: string,
   /** 一部を直すのか、全体を作り替えるのか（D-023） */
   scope: EditScope = 'local',
+  /**
+   * intent がプランナーの清書か（D-027）。**語で判定する規則を当てない印**——
+   * 下の規則は「利用者の日本語」に対して書かれている。清書へ当てると、
+   * 清書自身が使う語（logo / remove）で誤爆する
+   */
+  rewritten = false,
 ): string {
   if (!parentPrompt || !hasSourceImage) {
     const base = parentPrompt ? `${parentPrompt}, ${intent}` : intent
@@ -78,7 +84,19 @@ export function promptForImageGeneration(
       : base
   }
 
-  if (isTextRemovalIntent(intent)) {
+  /**
+   * 文字消しの定型文は **intent を捨てて** 置き換わる。清書に当てると、
+   * 清書が書いた指示ごと消える（D-027）。実測:
+   *
+   *   利用者「方向性はこの形として、弓だけを消して、単色にして、フラット化してください」
+   *   → 清書に logo と remove が入っていたので文字消しと判定され、渡ったのは
+   *     `Remove the wordmark and all lettering ... Preserve the symbol, line geometry,
+   *      colors, composition, and background.`
+   *
+   * 弓は消えず、単色化は `colors` の保存で打ち消され、フラット化はどこにも残らなかった。
+   * **3 つの依頼が全部、規則の誤爆で消えている。**
+   */
+  if (!rewritten && isTextRemovalIntent(intent)) {
     return [
       'Edit the input image.',
       ...(hasEditRegion ? ['Edit only the selected region and blend it seamlessly with the surrounding image.'] : []),

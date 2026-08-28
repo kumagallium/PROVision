@@ -142,4 +142,34 @@ describe('全体を作り替える依頼（D-023）', () => {
     expect(isWholeImageIntent('もう少し余白を取って')).toBe(false)
     expect(isWholeImageIntent('「asterism」の文字を少し小さくして')).toBe(false)
   })
+
+  it('清書を、文字消しの定型文で置き換えない', () => {
+    // 実測: 「弓だけを消して、単色にして、フラット化して」の清書に logo と remove が
+    // 入っていたため文字消しと判定され、依頼が 3 つとも消えた版が残っている
+    const rewritten =
+      'Remove the bow from the logo. Redraw it as a flat vector illustration in one single ink colour; no second colour, no gradients.'
+    const prompt = promptForImageGeneration(
+      'a rich constellation emblem',
+      rewritten,
+      true,
+      false,
+      undefined,
+      'whole',
+      true,
+    )
+    expect(prompt).toContain('Remove the bow from the logo')
+    expect(prompt).toContain('one single ink colour')
+    expect(prompt).not.toContain('Remove the wordmark and all lettering')
+    // 単色化を打ち消していた文
+    expect(prompt).not.toContain('Preserve the symbol, line geometry, colors')
+  })
+
+  it('清書が無いときは、従来どおり文字消しの定型文を使う', () => {
+    const prompt = promptForImageGeneration(
+      'a logo with the word Asterism',
+      'Asterismという文字（ロゴタイプ）を消してください',
+      true,
+    )
+    expect(prompt).toContain('Remove the wordmark')
+  })
 })

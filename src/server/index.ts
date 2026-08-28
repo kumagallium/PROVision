@@ -1029,6 +1029,8 @@ app.post('/api/generate', async (c) => {
             plan.arguments.text,
             // 保存を求める文は条件形。範囲は「作り替えを強く促すか」の判断（D-023）
             editScope.scope,
+            // 清書へ、日本語向けの語の規則を当てない（D-027）
+            plan.prompt !== undefined,
           )
         : instruction
     const usesImageModel =
