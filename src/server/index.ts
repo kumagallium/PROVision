@@ -500,6 +500,8 @@ app.post('/api/ai/planner/test', async (c) => {
       intent: 'Make the existing image slightly warmer without changing its composition.',
       context: { hasSourceImage: true, hasEditRegion: false },
       planner: { ...connection, enabled: true, modelId },
+      // 確かめたいのは接続。清書の頼み直しまでやると待ち時間が倍になる（D-026）
+      repairMissingPrompt: false,
       signal: c.req.raw.signal,
     })
     if (planned.warning) return c.json({ error: planned.warning }, 400)

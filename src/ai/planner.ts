@@ -96,6 +96,24 @@ export interface PlanningContext {
   parentText?: string
 }
 
+/**
+ * 清書の上限（D-026）。600 字では、曖昧な様式語を視覚属性まで開くと切れる。
+ * 青天井にしないのは、拡散モデルの注意が薄まると変更命令まで効かなくなるため
+ */
+export const MAX_REWRITTEN_PROMPT_LENGTH = 900
+
+/**
+ * 清書に日本語が残っているか（D-026）。**訳し漏れは清書の失敗として扱う。**
+ *
+ * flux2 の符号化器は日本語の指示をほとんど汲めない。そのまま渡すと「元の絵を
+ * 少しいじっただけ」の版が返る（実測: 「弓矢を無くして」がそのまま渡り、弓矢が残った）
+ */
+export function needsTranslation(prompt: string, renderText?: string): boolean {
+  // 描く文字列そのものは訳してはいけない。日本語のワードマークなら日本語で残る
+  const body = renderText ? prompt.split(renderText).join(' ') : prompt
+  return /[\u3040-\u30ff\u3400-\u9fff]/.test(body)
+}
+
 function boundedInteger(value: unknown, min: number, max: number): number | undefined {
   if (
     typeof value !== 'number' ||
@@ -205,8 +223,13 @@ export function validateImagePlan(
       ? raw.prompt.replace(/\s+/g, ' ').trim()
       : undefined
   if (rewritten) {
-    if (rewritten.length > 600 || /[\u0000-\u001f\u007f]/.test(rewritten)) {
-      throw new Error('promptは制御文字を含まない600文字以内で指定します')
+    if (
+      rewritten.length > MAX_REWRITTEN_PROMPT_LENGTH ||
+      /[\u0000-\u001f\u007f]/.test(rewritten)
+    ) {
+      throw new Error(
+        `promptは制御文字を含まない${MAX_REWRITTEN_PROMPT_LENGTH}文字以内で指定します`,
+      )
     }
     // 推定した文字列が書き直しで落ちると、描画対象が失われる
     if (text && !rewritten.includes(text)) {
@@ -527,6 +550,20 @@ async function callPlanner(
   return content || (choice?.message?.reasoning_content ?? '')
 }
 
+/**
+ * 清書の書き方（D-026）。振り分けと、清書だけの頼み直しで**同じ文言を使う**——
+ * 片方だけ直すと、頼み直しで質の違う文が返り、原因が追えなくなる
+ */
+const REWRITE_RULES = [
+  'Write it in English. The image model cannot follow Japanese, so leaving the instruction untranslated silently produces a picture that ignores it.',
+  'Rewrite faithfully: resolve ambiguity using the lineage and keep every explicit user constraint.',
+  'Make vague style words concrete, so the image model has something to act on: "flat" becomes flat vector illustration with solid fills and uniform line weight; "simple" becomes few shapes and a limited palette. Expanding a style word the user did use is required. Adding subjects, objects, moods, or lettering the user never mentioned is not.',
+  'State a removal as an explicit absence as well as an action: not only "remove the bow and arrow" but also "no bow, no arrow anywhere in the image".',
+  'Do the same for every other constraint: name everything it covers, and say it both ways. Not "using a single colour" but "one single ink colour; every ring, star and line in that same colour; no second colour, no red, no yellow". A constraint mentioned once in passing is ignored.',
+  'Say what must stay recognisable, but never write a blanket "preserve all existing colors and geometry": it cancels the requested change.',
+  'Up to 4 sentences. Be specific rather than long.',
+]
+
 /** 1 回の送信で出せる候補の上限。1 枚 1〜3 分の直列実行なので、4 枚で 10 分前後になる */
 export const MAX_VARIANTS = 4
 
@@ -579,7 +616,9 @@ export async function proposeVariantPrompts(input: {
     'Return JSON only: {"prompts":["...","..."]}.',
     `Give exactly ${count} concise English instructions for an image model.`,
     'Each must be a genuinely different direction — different composition, metaphor, or visual treatment. Do not restate the same idea in other words.',
-    'Keep every explicit user constraint in all of them. Max 2 sentences each.',
+    'Keep every explicit user constraint in all of them.',
+    // 候補も同じ経路で画像モデルへ渡る。ここだけ緩いと、候補だけが指示から外れる
+    ...REWRITE_RULES,
     ...(input.text
       ? [`Every prompt must contain the exact string ${JSON.stringify(input.text)}.`]
       : []),
@@ -600,7 +639,11 @@ export async function proposeVariantPrompts(input: {
         .map((value) => value.replace(/\s+/g, ' ').trim())
         .filter(
           (value) =>
-            value.length > 0 && value.length <= 600 && !/[\u0000-\u001f\u007f]/.test(value),
+            value.length > 0 &&
+            value.length <= MAX_REWRITTEN_PROMPT_LENGTH &&
+            !/[\u0000-\u001f\u007f]/.test(value) &&
+            // 訳し漏れた案は画像モデルが汲めない。seed 違いへ落ちるほうがまだ良い
+            !needsTranslation(value, input.text),
         )
         // 推定した文字列が落ちると、描画対象が失われる（validateImagePlan と同じ縛り）
         .filter((value) => !input.text || value.includes(input.text)),
@@ -611,12 +654,66 @@ export async function proposeVariantPrompts(input: {
   return unique.slice(0, count)
 }
 
+/**
+ * 清書だけをもう一度頼む（D-026）。
+ *
+ * **ツールの選択はやり直さない。** 実測では振り分けは当たっていたのに清書だけが
+ * 欠け（`prompt` が任意だった）、生の日本語がそのまま画像モデルへ渡っていた。
+ * 計画ごと捨てると規則ベースへ落ちて別のツールが動く（D-013）ので、欠けた所だけ埋める。
+ */
+export async function rewriteInstruction(input: {
+  intent: string
+  /** 描く文字列が決まっているなら、清書はそれを含まなければならない */
+  text?: string
+  lineage?: string[]
+  planner: AiPlannerConfig & { apiKey: string }
+  signal?: AbortSignal
+}): Promise<string> {
+  const prompt = [
+    'You rewrite one image request into the exact instruction an image model receives.',
+    'Return JSON only: {"prompt":"..."}.',
+    ...REWRITE_RULES,
+    ...(input.text
+      ? [`The prompt must contain the exact string ${JSON.stringify(input.text)}.`]
+      : []),
+    ...(input.lineage?.length
+      ? [`Prior instructions in this lineage (oldest first): ${JSON.stringify(input.lineage)}`]
+      : []),
+    `User instruction: ${JSON.stringify(input.intent)}`,
+  ].join('\n')
+
+  const parsed = extractJson(await callPlanner(input.planner, prompt, input.signal)) as {
+    prompt?: unknown
+  }
+  const rewritten =
+    typeof parsed.prompt === 'string' ? parsed.prompt.replace(/\s+/g, ' ').trim() : ''
+  if (
+    !rewritten ||
+    rewritten.length > MAX_REWRITTEN_PROMPT_LENGTH ||
+    /[\u0000-\u001f\u007f]/.test(rewritten)
+  ) {
+    throw new Error('清書が空か、長さの上限を超えました')
+  }
+  // 訳せていないなら清書になっていない。渡しても画像モデルは汲めない
+  if (needsTranslation(rewritten, input.text)) throw new Error('清書に日本語が残っています')
+  if (input.text && !rewritten.includes(input.text)) {
+    throw new Error('清書に描画対象の文字列が含まれていません')
+  }
+  return rewritten
+}
+
 export async function planImageOperation(input: {
   intent: string
   context: PlanningContext
   /** 系譜のこれまでの指示（根に近い順）。製品名などの文脈推定に使う */
   lineage?: string[]
   planner?: AiPlannerConfig & { apiKey: string }
+  /**
+   * 清書が欠けたときに、清書だけを頼み直すか（D-026）。既定は頼み直す。
+   * **接続テストでは切る**——確かめたいのは繋がるかどうかで、2 度目の呼び出しは
+   * 待ち時間を倍にするだけであり、そこで失敗しても接続は生きている
+   */
+  repairMissingPrompt?: boolean
   signal?: AbortSignal
 }): Promise<PlannedImageOperation> {
   const deterministic = explicitRule(input.intent, input.context)
@@ -638,10 +735,11 @@ export async function planImageOperation(input: {
     toolCatalogForPrompt({ forbidSynthesis: input.context.forbidSynthesis }),
     'When the user asks to add lettering (wordmark/logotype), set arguments.text to the exact string (<=40 chars). Take it from the instruction, or from the lineage when the instruction does not name it. Omit arguments.text when no name is available anywhere.',
     'Context.parentTool is the tool that produced the current picture, and Context.parentText is the lettering it drew. When parentTool is image.wordmark and the user wants to change the gap, margin, or spacing around that lettering, choose image.wordmark again: set arguments.text to Context.parentText and arguments.padding in pixels (roughly 8 for tight, 24 for default, 60 for airy). The band is rebuilt from the artwork underneath, so nothing is lost. Do not use image.edit for that — the diffusion model repaints everything and drops the lettering.',
-    'For image.generate and image.edit you may set "prompt": rewrite the user instruction into one concise English instruction for the image model.',
+    // **省かせない**（D-026）。省くと生の日本語がそのまま画像モデルへ渡る
+    'For image.generate and image.edit you must always set "prompt": this exact string is what the image model receives. If you omit it, the raw user text is sent instead and the edit comes out wrong.',
     'Also set "scope" for those two tools: "whole" when the instruction asks to restyle, simplify, abstract, flatten, redraw as a flat or solid illustration, change the art style, or otherwise remake the entire picture; "local" only when it changes one part or detail (a margin, one colour, one element). This decides whether the image model is told to redraw the whole picture. Getting it wrong no longer breaks the edit, but a restyle comes out weaker when it is marked "local".',
     'Examples of "whole": make it flat, make it simpler, abstract it, turn it into a line drawing, change the art style. Examples of "local": widen the margin, make the lettering smaller, change the background colour.',
-    'Rewrite faithfully: translate, resolve ambiguity using the lineage, keep every user constraint. Do not invent styles, moods, or elements the user did not request. Max 2 sentences.',
+    ...REWRITE_RULES,
     'If arguments.text is set, the rewritten prompt must contain that exact string.',
     `Context: ${JSON.stringify(input.context)}`,
     ...(input.lineage?.length
@@ -652,12 +750,41 @@ export async function planImageOperation(input: {
 
   try {
     const raw = await callPlanner(planner, prompt, input.signal)
-    return {
-      plan: validateImagePlan(extractJson(raw), input.context),
+    const plan = validateImagePlan(extractJson(raw), input.context)
+    const planned: PlannedImageOperation = {
+      plan,
       mode: 'llm',
       plannerProvider: planner.provider,
       plannerModel: planner.modelId,
     }
+    /**
+     * 清書が欠けた、または訳し漏れたときだけ、**清書だけ**を頼み直す（D-026）。
+     * ここを素通りさせると、利用者の日本語がそのまま画像モデルへ渡る
+     */
+    if (
+      input.repairMissingPrompt !== false &&
+      imageToolDefinition(plan.tool).usesPrompt &&
+      (!plan.prompt || needsTranslation(plan.prompt, plan.arguments.text))
+    ) {
+      try {
+        planned.plan = {
+          ...plan,
+          prompt: await rewriteInstruction({
+            intent: input.intent,
+            text: plan.arguments.text,
+            lineage: input.lineage,
+            planner,
+            signal: input.signal,
+          }),
+        }
+      } catch (error) {
+        // 計画は捨てない。選ばれたツールは当たっている（D-013）
+        planned.warning = `指示を英語へ書き直せなかったため、利用者の言葉のまま画像モデルへ渡します: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      }
+    }
+    return planned
   } catch (error) {
     return {
       plan: fallback,
