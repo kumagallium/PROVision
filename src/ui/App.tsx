@@ -25,6 +25,13 @@ export function App() {
    * ここが動いていないと止まって見える（1 枚 1〜2 分かかる）
    */
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  /**
+   * 直近の送信の**直前に**あった版（D-028）。ここに無い版が「この送信で生まれたもの」。
+   *
+   * チャットの中だけで持っていたが、グラフからは同じことが分からなかった。
+   * **数えているのは片方だけで、見たいのは両方**なので、持ち主を上へ移す
+   */
+  const [bornBefore, setBornBefore] = useState<ReadonlySet<string> | null>(null)
 
   const applyDoc = useCallback((doc: ProvJsonLdDocument) => {
     setGraph(fromProvJsonLd(doc, DEFAULT_BASE))
@@ -92,6 +99,17 @@ export function App() {
     [graph, currentRoot],
   )
 
+  /** この送信で生まれた版。写しには混ぜない——混ぜるとグラフが並び直す（D-028） */
+  const fresh = useMemo(() => {
+    if (!graph || !bornBefore) return new Set<string>()
+    return new Set(
+      graph
+        .listEntities()
+        .filter((entity) => !bornBefore.has(entity.id))
+        .map((entity) => entity.id),
+    )
+  }, [graph, bornBefore])
+
   if (error) {
     return (
       <div style={{ padding: 24, fontFamily: 'system-ui', color: '#a8513f' }}>
@@ -126,7 +144,7 @@ export function App() {
 
       <ReactFlowProvider>
         {currentRoot ? (
-          <GraphPane flow={flow} current={current} onSelect={setCurrent} />
+          <GraphPane flow={flow} current={current} fresh={fresh} onSelect={setCurrent} />
         ) : (
           <div
             style={{
@@ -161,6 +179,8 @@ export function App() {
         onGraph={applyDoc}
         onSelect={setCurrent}
         onProgress={setProgress}
+        bornBefore={bornBefore}
+        onBornBefore={setBornBefore}
       />
 
       {settingsOpen ? (

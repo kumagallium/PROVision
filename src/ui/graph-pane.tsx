@@ -64,10 +64,13 @@ function measureNodes(expected: number, expectedImages: number): LayoutNode[] | 
 export function GraphPane({
   flow,
   current,
+  fresh,
   onSelect,
 }: {
   flow: { nodes: FlowNode[]; edges: FlowEdge[] } | null
   current: string | null
+  /** 直近の送信で生まれた版（D-028）。印を付けるだけで、位置には触らない */
+  fresh: ReadonlySet<string>
   onSelect: (id: string | null) => void
 }) {
   // 制御モードでは onNodesChange を渡す。渡さないと選択もドラッグも効かない
@@ -84,6 +87,8 @@ export function GraphPane({
   /** 並べたあとの背丈の変化を見張る。画像が遅れて載ると背が伸びる */
   const observer = useRef<ResizeObserver | undefined>(undefined)
   const resizeTimer = useRef<number | undefined>(undefined)
+  /** 画面の大きさを測る先。選んだ版が外に出ているかの判定に要る（D-028） */
+  const wrapper = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!flow) return
@@ -170,10 +175,59 @@ export function GraphPane({
     }
   }, [flow, setNodes, setEdges])
 
-  // 選択の反映は位置に触らない（並べ直しを起こさないため）
+  /**
+   * 選択と「新」の反映は位置に触らない（並べ直しを起こさないため）。
+   *
+   * **`toFlow` に混ぜない**のもこのため（D-028）。写しを作り直すと、下の
+   * 並べ直しの effect が丸ごと走り、測り直しとレイアウトが毎回やり直しになる
+   */
   useEffect(() => {
-    setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === current })))
-  }, [current, setNodes])
+    setNodes((prev) =>
+      prev.map((n) => ({
+        ...n,
+        selected: n.id === current,
+        data: { ...n.data, fresh: fresh.has(n.id) },
+      })),
+    )
+  }, [current, fresh, setNodes])
+
+  /**
+   * 選んだ版が画面の外なら、そこへ寄せる（D-028）。
+   *
+   * **外に出ているときだけ動かす。** 見えているのに動かすと、利用者が自分で
+   * 動かした位置を勝手に戻されることになる。倍率も変えない——選び直すたびに
+   * 拡大率が変わると、どこを見ているのか分からなくなる
+   */
+  useEffect(() => {
+    if (!current || !laidOut) return
+    const view = wrapper.current
+    const instance = instanceRef.current
+    /**
+     * `getNode` ではなく `getInternalNode`。**寸法と絶対位置が確実に入っている**のは
+     * こちらだけで、`getNode` が返す版は測る前だと `measured` を持たない（実測: 寄せが
+     * 一度も動かなかった）
+     */
+    const node = instance.getInternalNode(current)
+    if (!view || !node?.measured.width || !node.measured.height) return
+    const { x, y, zoom } = instance.getViewport()
+    const at = node.internals.positionAbsolute
+    const left = at.x * zoom + x
+    const top = at.y * zoom + y
+    const right = left + node.measured.width * zoom
+    const bottom = top + node.measured.height * zoom
+    const margin = 24
+    const outside =
+      left < margin ||
+      top < margin ||
+      right > view.clientWidth - margin ||
+      bottom > view.clientHeight - margin
+    if (!outside) return
+    // duration を付けない。アニメーションは rAF で動くので、隠れたタブでは
+    // 一度も進まないまま終わる（実測。上の fitView が同じ理由で付けていない）
+    void instance.setCenter(at.x + node.measured.width / 2, at.y + node.measured.height / 2, {
+      zoom,
+    })
+  }, [current, laidOut])
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
@@ -189,7 +243,10 @@ export function GraphPane({
   )
 
   return (
-    <div style={{ minWidth: 0, borderLeft: '1px solid #e0e5e8', height: '100%' }}>
+    <div
+      ref={wrapper}
+      style={{ minWidth: 0, borderLeft: '1px solid #e0e5e8', height: '100%' }}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}

@@ -31,11 +31,22 @@ interface Props {
   current: string | null
   onGraph: (doc: ProvJsonLdDocument) => void
   onSelect: (id: string) => void
+  /** 直近の送信の直前にあった版。持ち主は App（グラフ側でも要るため / D-028） */
+  bornBefore: ReadonlySet<string> | null
+  onBornBefore: (ids: ReadonlySet<string>) => void
   /** 生成の進み具合。会話を選んでいないときは真ん中の面がこれを出す */
   onProgress?: (progress: { done: number; total: number } | null) => void
 }
 
-export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Props) {
+export function ChatPane({
+  graph,
+  current,
+  onGraph,
+  onSelect,
+  onProgress,
+  bornBefore,
+  onBornBefore,
+}: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,12 +64,13 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
    * 送信を始めた時点で在った版。**これに無いものが、この送信で生まれた版**である。
    * 生成は直列なので、待っている間にグラフは 1 枚ずつ増える
    */
-  const [bornBefore, setBornBefore] = useState<ReadonlySet<string>>(new Set())
   const [editRegion, setEditRegion] = useState<EditRegionSelection | null>(null)
 
   /** この送信で生まれた版。**まとめて返るのを待たずに 1 枚ずつ出す** */
   const born =
-    busy && graph ? graph.listEntities().filter((entity) => !bornBefore.has(entity.id)) : []
+    busy && graph && bornBefore
+      ? graph.listEntities().filter((entity) => !bornBefore.has(entity.id))
+      : []
   const chain = graph && current ? graph.lineage(current) : []
   const children = graph && current ? graph.children(current) : []
   /** いま居る版に子がある = ここへ送ると枝が生える */
@@ -92,7 +104,7 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
       .then((r) => (r.ok ? (r.json() as Promise<ProvJsonLdDocument>) : null))
       .then((doc) => (doc ? fromProvJsonLd(doc, DEFAULT_BASE) : null))
       .catch(() => null)
-    setBornBefore(
+    onBornBefore(
       new Set((before ?? graph)?.listEntities().map((entity) => entity.id) ?? []),
     )
     setBusy(true)
@@ -173,7 +185,8 @@ export function ChatPane({ graph, current, onGraph, onSelect, onProgress }: Prop
       finished = true
       window.clearInterval(poll)
       setBusy(false)
-      setBornBefore(new Set())
+      // **ここで消さない。** 終わった瞬間に消すと、グラフの「新」の印も同時に
+      // 消える（D-028）。次の送信が始まるときに置き換わるので、消す必要も無い
     }
   }
 
