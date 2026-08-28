@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.18](https://github.com/kumagallium/PROVision/compare/v0.2.17...v0.2.18) - 2026-08-28
+
+- fix(ai): 清書を必須にして、日本語のまま画像モデルへ渡さない by @kumagallium in https://github.com/kumagallium/PROVision/pull/54
+
 ## [v0.2.17](https://github.com/kumagallium/PROVision/compare/v0.2.16...v0.2.17) - 2026-08-28
 
 - ci(tagpr): リリース PR を検査できる余地を残す by @kumagallium in https://github.com/kumagallium/PROVision/pull/51
