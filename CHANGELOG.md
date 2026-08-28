@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.2.17](https://github.com/kumagallium/PROVision/compare/v0.2.16...v0.2.17) - 2026-08-28
+
+- ci(tagpr): リリース PR を検査できる余地を残す by @kumagallium in https://github.com/kumagallium/PROVision/pull/51
+- fix: ポートの許可も動かし、Keychain で固まらないようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/53
+
 ## [v0.2.16](https://github.com/kumagallium/PROVision/compare/v0.2.15...v0.2.16) - 2026-08-28
 
 - fix(ui): ポートを OS に選ばせる by @kumagallium in https://github.com/kumagallium/PROVision/pull/49
