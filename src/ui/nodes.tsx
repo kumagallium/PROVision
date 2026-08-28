@@ -3,15 +3,44 @@ import type { FlowNodeData } from './graph-adapter.js'
 import { PALETTE } from './palette.js'
 import { ProvImage } from './prov-image.js'
 
+/**
+ * 選択は **寸法を変えずに** 示す（D-028）。枠を太らせると実寸が変わり、
+ * 背丈を見張っている ResizeObserver が並べ直しを始める。影なら外へ広がるだけで
+ * カードの大きさは 1px も動かない。
+ *
+ * 白を 1 枚挟んでから色を置くのは、点線の背景や隣のカードと地続きに見えないため。
+ */
 const card = (main: string, bg: string, selected: boolean): React.CSSProperties => ({
   border: `1.5px solid ${main}`,
   borderRadius: 10,
   background: bg,
-  boxShadow: selected ? `0 0 0 3px ${main}44` : '0 1px 3px rgba(0,0,0,.12)',
+  boxShadow: selected
+    ? `0 0 0 3px #fff, 0 0 0 6px ${main}, 0 6px 16px rgba(0,0,0,.18)`
+    : '0 1px 3px rgba(0,0,0,.12)',
   overflow: 'hidden',
   fontSize: 12,
   lineHeight: 1.4,
+  position: 'relative',
 })
+
+/**
+ * この送信で生まれた版の印（D-028）。**重ねて置く**——カードの中に足すと
+ * 背が伸びて、印が付いた瞬間にグラフ全体が並び直す
+ */
+const FRESH_BADGE: React.CSSProperties = {
+  position: 'absolute',
+  top: 6,
+  right: 6,
+  zIndex: 1,
+  background: PALETTE.image.main,
+  color: '#fff',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '.06em',
+  padding: '2px 7px',
+  borderRadius: 999,
+  boxShadow: '0 1px 4px rgba(0,0,0,.25)',
+}
 
 /** 見出しは行数で刈る。指示文が段落だとカードが巨大になり、並べようがなくなる */
 const title = (text: string, lines = 2): React.CSSProperties => ({
@@ -45,6 +74,7 @@ export function ImageNode({ data, selected }: NodeProps) {
       title={d.borrowed ? `${d.label}（別の会話から材料として使った）` : d.label}
     >
       <Handle type="target" position={Position.Top} />
+      {d.fresh ? <div style={FRESH_BADGE}>新</div> : null}
       {d.borrowed ? (
         <div style={{ padding: '4px 8px 0', fontSize: 10, color: c.text }}>別の会話から</div>
       ) : null}

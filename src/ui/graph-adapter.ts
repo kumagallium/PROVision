@@ -22,6 +22,11 @@ export interface FlowNodeData {
   branches?: number
   /** 別の会話から材料として借りてきた版か（D-021） */
   borrowed?: boolean
+  /**
+   * 直近の送信で生まれた版か（D-028）。**写しの段階では決めない**——
+   * これは記録の性質ではなく画面の状態なので、`toFlow` ではなく描く直前に載せる
+   */
+  fresh?: boolean
   [key: string]: unknown
 }
 
