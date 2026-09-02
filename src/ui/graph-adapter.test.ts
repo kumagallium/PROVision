@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ProvGraph } from '../prov/graph.js'
-import { imageUrlOf, toFlow } from './graph-adapter.js'
+import { executedPromptOf, imageUrlOf, toFlow } from './graph-adapter.js'
 
 const bytes = (s: string) => new TextEncoder().encode(s)
 const CURVE = 'https://kumagallium.github.io/asterism/starrydata/resource/curve/1171-318-665'
@@ -81,6 +81,70 @@ describe('React Flow への写し取り', () => {
     expect(labels).toContain('余白を')
     expect(labels).toContain('寒色に')
     expect(labels).toContain('v1')
+  })
+
+  it('生成ノードは実行された全文（清書）を持ち、指示の節点から生えたことも分かる（D-030）', () => {
+    const g = new ProvGraph()
+    const tool = g.addAgent('mflux', 'mflux')
+    const plan = g.addPlan('タコの 8 のアイコン', '2026-09-02T05:00:00Z')
+    const common = {
+      model: 'z-image-turbo-6bit',
+      startedAtTime: '2026-09-02T05:00:00Z',
+      endedAtTime: '2026-09-02T05:01:00Z',
+      agents: [tool.id],
+      intent: 'タコの 8 のアイコン',
+      selectedTool: 'image.generate',
+      planId: plan.id,
+    }
+    g.recordGeneration({
+      ...common,
+      image: bytes('a'),
+      label: 'a',
+      seed: 1,
+      prompt: 'Flat vector badge with a circular outline, octopus head',
+    })
+    g.recordGeneration({
+      ...common,
+      image: bytes('b'),
+      label: 'b',
+      seed: 2,
+      prompt: 'Flat vector monogram, the letter O shaped as an 8',
+    })
+    const { nodes } = toFlow(g)
+    const activities = nodes.filter((n) => n.type === 'activity')
+    // 兄弟は同じ意図を持つが、見せるべきはそれぞれの清書
+    expect(activities.map((n) => n.data.prompt).sort()).toEqual([
+      'Flat vector badge with a circular outline, octopus head',
+      'Flat vector monogram, the letter O shaped as an 8',
+    ])
+    expect(activities.every((n) => n.data.planned === true)).toBe(true)
+    expect(activities.every((n) => n.data.label === 'タコの 8 のアイコン')).toBe(true)
+  })
+
+  it('清書を使わない道具や、意図と同じ文しか無い記録には清書を付けない', () => {
+    const base = {
+      id: 'x',
+      label: 'v',
+      model: 'm',
+      seed: 1,
+      startedAtTime: '2026-09-02T05:00:00Z',
+      endedAtTime: '2026-09-02T05:01:00Z',
+      used: [],
+      referenced: [],
+      generated: 'e',
+      wasAssociatedWith: [],
+    }
+    // Jimp は画像モデルを使わない。記録された prompt は指示の写しにすぎない
+    expect(
+      executedPromptOf({ ...base, intent: '回転して', prompt: '回転して', selectedTool: 'image.rotate' }),
+    ).toBeUndefined()
+    expect(executedPromptOf({ ...base, prompt: '取り込み', selectedTool: 'image.import' })).toBeUndefined()
+    // 道具が記録されていない古い版: 意図と同じ文なら出さない、違えば出す
+    expect(executedPromptOf({ ...base, intent: '余白を', prompt: '余白を' })).toBeUndefined()
+    expect(executedPromptOf({ ...base, intent: '余白を', prompt: 'wider margins' })).toBe('wider margins')
+    // 1 本だけの送信（指示の節点なし）は planned にならない
+    const { nodes } = toFlow(branchingGraph())
+    expect(nodes.filter((n) => n.type === 'activity').every((n) => n.data.planned === false)).toBe(true)
   })
 
   it('画像の置き場所を配信 URL に直す', () => {

@@ -6,6 +6,7 @@
  */
 import type { ProvGraph } from '../prov/graph.js'
 import type { GenerationActivity, ImageEntity, Iri } from '../prov/types.js'
+import { imageToolDefinition, type ImageToolName } from '../ai/tools.js'
 
 export type FlowNodeKind = 'image' | 'activity' | 'external' | 'plan'
 
@@ -20,6 +21,13 @@ export interface FlowNodeData {
   iri?: Iri
   /** 指示ノードのみ。その送信から走った本数 */
   branches?: number
+  /**
+   * 生成ノードのみ。画像モデルへ実際に渡った全文（清書、D-030）。
+   * 意図と同じ文しか無いとき、清書を使わないツールのときは付けない
+   */
+  prompt?: string
+  /** 生成ノードのみ。指示の節点（D-022）から生えている＝意図はそちらが出す */
+  planned?: boolean
   /** 別の会話から材料として借りてきた版か（D-021） */
   borrowed?: boolean
   /**
@@ -43,6 +51,33 @@ export interface FlowEdge {
   target: string
   /** 生成の辺か、人間が参照した辺か。見た目を変える */
   data: { kind: 'used' | 'referenced' | 'generated' | 'alternate' | 'planned' }
+}
+
+/** その道具が清書（画像モデルへ渡す全文）を使うか。知らない名前なら判断しない */
+function usesPrompt(tool: string | undefined): boolean | undefined {
+  if (!tool) return undefined
+  try {
+    return imageToolDefinition(tool as ImageToolName).usesPrompt === true
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 節点に出す清書（D-030）。**実行された全文**であって、意図の言い換えではない。
+ *
+ * 道具が分かるならそれで決める（Jimp や取り込みは清書を持たない）。分からない
+ * 古い記録では、意図や版の名前と同じ文なら出しても言えることが増えないので付けない。
+ */
+export function executedPromptOf(activity: GenerationActivity): string | undefined {
+  const prompt = activity.prompt.trim()
+  if (!prompt) return undefined
+  const uses = usesPrompt(activity.selectedTool)
+  if (uses === false) return undefined
+  if (uses === undefined && (prompt === activity.intent?.trim() || prompt === activity.label)) {
+    return undefined
+  }
+  return prompt
 }
 
 /**
@@ -163,6 +198,9 @@ export function toFlow(
         // 意図がある世代は意図を見出しにする。無い（＝初回）ときは版の名前
         label: activity.intent ?? activity.label,
         activity,
+        // 節点が見せるのは実行された全文（D-030）。意図は指示の節点が出す
+        ...(executedPromptOf(activity) ? { prompt: executedPromptOf(activity) } : {}),
+        planned: activity.planId !== undefined,
       },
     })
 
