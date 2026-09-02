@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.22](https://github.com/kumagallium/PROVision/compare/v0.2.21...v0.2.22) - 2026-09-02
+
+- fix(ui): 生成の節点に意図ではなく実行された全文（清書）を出す by @kumagallium in https://github.com/kumagallium/PROVision/pull/64
+
 ## [v0.2.21](https://github.com/kumagallium/PROVision/compare/v0.2.20...v0.2.21) - 2026-09-02
 
 - fix(bundle): 同梱する uv を externalBin に移し、本体と同じ署名を受けるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/62
