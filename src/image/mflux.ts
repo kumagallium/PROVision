@@ -91,7 +91,10 @@ export function cacheKeyOf(input: GenerateInput, model: string): string {
  * ここで 1 つに決め打ちしないのは、必要メモリが機種の搭載量に直接効くから。
  * 16GB 機は 4bit、余裕のある機械は 6bit、と利用者が置いたもので決まるようにする。
  */
-const MODEL_DIRS_BEST_FIRST = ['z-image-turbo-6bit', 'z-image-turbo-4bit'] as const
+export const MODEL_DIRS_BEST_FIRST = ['z-image-turbo-6bit', 'z-image-turbo-4bit'] as const
+
+/** 編集特化モデルの置き場の名前。`--model flux2-klein-4b --quantize 8` が返す識別子と同じ綴り */
+export const EDIT_MODEL_DIR = 'flux2-klein-4b-q8'
 
 /**
  * 置き場。`provision` が本来の場所で、`geologo` は前身プロジェクトの置き場。
@@ -99,17 +102,39 @@ const MODEL_DIRS_BEST_FIRST = ['z-image-turbo-6bit', 'z-image-turbo-4bit'] as co
  * どちらに置いても記録される識別子はディレクトリ名ではなくモデル名なので、
  * 場所を移しても再現の突き合わせには影響しない。
  */
-const MODEL_CACHE_DIRS = ['provision', 'geologo'] as const
+export const MODEL_CACHE_DIRS = ['provision', 'geologo'] as const
 
-function findSavedModel(
+/** その名前のモデルが置かれている場所。無ければ null。`exists` を差し替えられるのはテストのため */
+export function savedModelPath(
+  name: string,
+  exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
+): string | null {
+  for (const dir of MODEL_CACHE_DIRS) {
+    const path = join(home, '.cache', dir, name)
+    if (exists(path)) return path
+  }
+  return null
+}
+
+/**
+ * `uv tool install` が実行ファイルを置く場所。導入（D-029）もここを前提にするので、
+ * 置き場を変えるならこの 1 か所で変える。
+ */
+export function mfluxBinPath(name: string, home: string = homedir()): string {
+  return join(home, '.local', 'bin', name)
+}
+
+/** 候補の名前を良い順に探す。導入（D-029）も同じ順で「もうある」を判定する */
+export function findSavedModel(
   namesBestFirst: readonly string[] = MODEL_DIRS_BEST_FIRST,
+  exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
 ): string | null {
   // 量子化の質を場所より優先する。6bit がどちらかにあれば、それを使う
   for (const name of namesBestFirst) {
-    for (const dir of MODEL_CACHE_DIRS) {
-      const path = join(homedir(), '.cache', dir, name)
-      if (existsSync(path)) return path
-    }
+    const path = savedModelPath(name, exists, home)
+    if (path) return path
   }
   return null
 }
@@ -122,7 +147,7 @@ function findSavedModel(
  * {imageStrength} {out} を差し替える。{image} は親画像を編集するときだけ使う。
  */
 export function suggestImageCommand(): string | null {
-  const bin = join(homedir(), '.local', 'bin', 'mflux-generate-z-image-turbo')
+  const bin = mfluxBinPath('mflux-generate-z-image-turbo')
   const saved = findSavedModel()
   if (!existsSync(bin) || !saved) return null
   return [
@@ -145,7 +170,7 @@ export function suggestImageCommand(): string | null {
  * --image-paths が必須）。汎用の生成モデルで編集させると文字が崩れる実測がある。
  */
 export function suggestImageEditCommand(): string | null {
-  const bin = join(homedir(), '.local', 'bin', 'mflux-generate-flux2-edit')
+  const bin = mfluxBinPath('mflux-generate-flux2-edit')
   if (!existsSync(bin)) return null
   const tail = [
     '--image-paths {image}',
@@ -165,7 +190,7 @@ export function suggestImageEditCommand(): string | null {
   // 置き場の名前をそのまま識別子にしている（modelIdOf はディレクトリ名を返す）。
   // `flux2-klein-4b-q8` は `--model flux2-klein-4b --quantize 8` が返す識別子と
   // 同じ綴りで、実際に同じ重み・同じ量子化なので、過去の版の再現も壊れない。
-  const saved = findSavedModel(['flux2-klein-4b-q8'])
+  const saved = findSavedModel([EDIT_MODEL_DIR])
   if (saved) {
     return [bin, `--model ${saved}`, '--base-model flux2-klein-4b', ...tail].join(' ')
   }
@@ -220,16 +245,28 @@ function checkTemplate(template: string): string {
   return template
 }
 
+/**
+ * 生成器が手元に無い。設定不足であって故障ではないので、画面はここから導入へ誘導する（D-029）。
+ * `code` は API の応答に載せる。文言で判定させると、文言を直した瞬間に誘導が消える。
+ */
+export class ImageCommandMissingError extends Error {
+  readonly code = 'image-command-missing' as const
+
+  constructor() {
+    super(
+      '画像生成コマンドが見つからない。設定の「画像生成」から導入するか、' +
+        'PROVISION_IMAGE_COMMAND を設定する。手で置くなら mflux の量子化済み z-image-turbo を ' +
+        '~/.cache/provision/z-image-turbo-6bit に' +
+        '（作り方: mflux-save --model z-image-turbo --quantize 6 --path <その場所>）',
+    )
+    this.name = 'ImageCommandMissingError'
+  }
+}
+
 export function resolveImageCommand(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.PROVISION_IMAGE_COMMAND?.trim()
   const template = configured || suggestImageCommand()
-  if (!template) {
-    throw new Error(
-      '画像生成コマンドが見つからない。PROVISION_IMAGE_COMMAND を設定するか、' +
-        'mflux の量子化済み z-image-turbo を ~/.cache/provision/z-image-turbo-6bit に置く' +
-        '（作り方: mflux-save --model z-image-turbo --quantize 6 --path <その場所>）',
-    )
-  }
+  if (!template) throw new ImageCommandMissingError()
   return checkTemplate(template)
 }
 

@@ -36,6 +36,8 @@ interface Props {
   onBornBefore: (ids: ReadonlySet<string>) => void
   /** 生成の進み具合。会話を選んでいないときは真ん中の面がこれを出す */
   onProgress?: (progress: { done: number; total: number } | null) => void
+  /** 生成器が無かったとき、設定の「画像生成」を開いてもらう（D-029） */
+  onOpenSetup?: () => void
 }
 
 export function ChatPane({
@@ -46,10 +48,13 @@ export function ChatPane({
   onProgress,
   bornBefore,
   onBornBefore,
+  onOpenSetup,
 }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** エラーに付いてきた印。文言ではなく、これで導入へ誘導する（D-029） */
+  const [errorCode, setErrorCode] = useState<string | null>(null)
   const [routingNotice, setRoutingNotice] = useState<string | null>(null)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
   /** 1 回の送信で出す候補の数（D-018）。**指示から数は読み取らない** */
@@ -109,6 +114,7 @@ export function ChatPane({
     )
     setBusy(true)
     setError(null)
+    setErrorCode(null)
     setRoutingNotice(null)
     /**
      * 1 枚できるたびに画面へ出す。サーバは 1 枚ずつ記録して保存するので、
@@ -158,8 +164,9 @@ export function ChatPane({
               scopeSource?: 'planner' | 'rules'
             }
           }
-        | { error: string }
+        | { error: string; code?: string }
       if (!res.ok || 'error' in body) {
+        if ('error' in body && body.code) setErrorCode(body.code)
         throw new Error('error' in body ? body.error : `生成に失敗（${res.status}）`)
       }
       onGraph(body.graph)
@@ -378,7 +385,20 @@ export function ChatPane({
             {routingNotice}
           </div>
         ) : null}
-        {error ? <div style={{ fontSize: 12, color: '#a8513f' }}>{error}</div> : null}
+        {error ? (
+          <div style={{ fontSize: 12, color: '#a8513f' }}>
+            {error}
+            {errorCode === 'image-command-missing' && onOpenSetup ? (
+              <button
+                type="button"
+                onClick={onOpenSetup}
+                style={{ display: 'block', marginTop: 6, padding: '5px 10px', fontSize: 12 }}
+              >
+                設定の「画像生成」から入れる
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div style={{ borderTop: '1px solid #e0e5e8', padding: 12 }}>

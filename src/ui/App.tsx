@@ -9,7 +9,8 @@ import { GraphPane } from './graph-pane.js'
 import { SessionPane } from './session-pane.js'
 import { ChatPane } from './chat-pane.js'
 import { apiFetch, ensureSidecar, isTauri } from './api-base.js'
-import { SettingsDialog } from './settings-dialog.js'
+import { SettingsDialog, type SettingsTab } from './settings-dialog.js'
+import { PALETTE } from './palette.js'
 import { checkUpdate, type UpdateInfo } from './updater.js'
 
 export function App() {
@@ -17,7 +18,13 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   /** いま居る版。チャットはここから分岐する */
   const [current, setCurrent] = useState<string | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  /** 開いている設定のタブ。閉じているときは null */
+  const [settingsOpen, setSettingsOpen] = useState<SettingsTab | null>(null)
+  /**
+   * 画像生成の環境がまだ無い（D-029）。生成で失敗する前に、真ん中の面で伝える。
+   * 確認に失敗したら黙る——導入できない環境でまで騒がない
+   */
+  const [setupNeeded, setSetupNeeded] = useState(false)
   /** 起動時に自動で確認した結果。見つかったら設定ボタンに印を出す */
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   /**
@@ -37,6 +44,15 @@ export function App() {
     setGraph(fromProvJsonLd(doc, DEFAULT_BASE))
   }, [])
 
+  const refreshSetup = useCallback(() => {
+    return apiFetch('api/setup/status')
+      .then(async (r) =>
+        r.ok ? ((await r.json()) as { supported: boolean; ready: boolean }) : null,
+      )
+      .then((status) => setSetupNeeded(Boolean(status && status.supported && !status.ready)))
+      .catch(() => setSetupNeeded(false))
+  }, [])
+
   const load = useCallback(() => {
     // デスクトップ版ではまずサイドカーを起こす。ブラウザでは何もしない
     return ensureSidecar()
@@ -46,8 +62,9 @@ export function App() {
         return (await r.json()) as ProvJsonLdDocument
       })
       .then(applyDoc)
+      .then(() => refreshSetup())
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [applyDoc])
+  }, [applyDoc, refreshSetup])
 
   useEffect(() => {
     void load()
@@ -136,7 +153,7 @@ export function App() {
         currentRoot={currentRoot}
         onOpen={setCurrent}
         onNew={() => setCurrent(null)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => setSettingsOpen('general')}
         updateAvailable={update !== null}
         onGraph={applyDoc}
         onDeleted={() => setCurrent(null)}
@@ -167,7 +184,41 @@ export function App() {
                 </div>
               </div>
             ) : (
-              '左から会話を選ぶと、その会話の来歴が出ます。'
+              <div>
+                <div>左から会話を選ぶと、その会話の来歴が出ます。</div>
+                {setupNeeded ? (
+                  <div
+                    style={{
+                      marginTop: 18,
+                      padding: '12px 14px',
+                      border: `1px solid ${PALETTE.external.main}`,
+                      background: PALETTE.external.bg,
+                      borderRadius: 8,
+                      color: PALETTE.external.text,
+                      maxWidth: 420,
+                    }}
+                  >
+                    <div style={{ marginBottom: 8 }}>
+                      画像を生成する環境（mflux とモデル）が、まだこの Mac に入っていません。
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsOpen('image')}
+                      style={{
+                        padding: '6px 14px',
+                        border: 'none',
+                        borderRadius: 7,
+                        background: PALETTE.external.main,
+                        color: '#fff',
+                        fontSize: 12.5,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      設定から入れる
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         )}
@@ -181,11 +232,17 @@ export function App() {
         onProgress={setProgress}
         bornBefore={bornBefore}
         onBornBefore={setBornBefore}
+        onOpenSetup={() => setSettingsOpen('image')}
       />
 
       {settingsOpen ? (
         <SettingsDialog
-          onClose={() => setSettingsOpen(false)}
+          initialTab={settingsOpen}
+          onClose={() => {
+            setSettingsOpen(null)
+            // 導入が済んでいれば案内を下げる
+            void refreshSetup()
+          }}
           onWorkspaceChanged={() => void reloadWorkspace()}
           update={update}
           onUpdateChecked={setUpdate}

@@ -23,6 +23,7 @@ import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
 import {
   DEFAULT_STEPS,
+  ImageCommandMissingError,
   cacheKeyOf,
   generateImage,
   modelIdOf,
@@ -32,6 +33,13 @@ import {
 } from '../image/mflux.js'
 import { probePlatform } from '../image/environment.js'
 import { addSoftwareAgent, commandTemplateOf, probeToolEnvironment } from './agents.js'
+import {
+  SetupRunner,
+  defaultRunnerDeps,
+  probeSetupStatus,
+  stopOnShutdown,
+  type SetupOptions,
+} from './setup.js'
 import { resolveInpaintCommand } from '../image/lama.js'
 import { imageContentDigest, pngDimensions } from '../image/png.js'
 import { MAX_IMPORT_BYTES, baseFileName, importImage } from '../image/import.js'
@@ -123,12 +131,19 @@ const RESOLVERS = {
   background: () => resolveBackgroundRemovalCommand(),
 }
 
-const imageTool = addSoftwareAgent(
-  graph,
-  'mflux',
-  'mflux (z-image-turbo-4bit)',
-  await probeToolEnvironment(() => resolveImageCommand(), ['mflux', 'mlx'], PLATFORM),
-)
+/**
+ * 生成器の Agent。導入（D-029）が終わったら取り直す——起動時に無かった mflux の版を
+ * 記録しないまま最初の生成を走らせると、その Activity は環境の分からない Agent を指す
+ */
+async function probeImageTool() {
+  return addSoftwareAgent(
+    graph,
+    'mflux',
+    'mflux (z-image-turbo-4bit)',
+    await probeToolEnvironment(() => resolveImageCommand(), ['mflux', 'mlx'], PLATFORM),
+  )
+}
+let imageTool = await probeImageTool()
 const inpaintTool = addSoftwareAgent(
   graph,
   'lama',
@@ -375,6 +390,39 @@ app.get('/api/health', (c) =>
     dataDir: DATA_DIR,
   }),
 )
+
+/**
+ * 画像生成環境の導入（D-029）。状態は実測で返し、導入は 1 本だけ走らせる。
+ * 進み具合は画面が状態を取り直して読む——ストリーミングより素朴で、Tauri の
+ * fetch でも確実に動く。
+ */
+const setupRunner = new SetupRunner({
+  ...defaultRunnerDeps(),
+  onReady: async () => {
+    imageTool = await probeImageTool()
+  },
+})
+stopOnShutdown(setupRunner)
+
+app.get('/api/setup/status', async (c) => c.json(await probeSetupStatus(setupRunner)))
+
+app.post('/api/setup/run', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as Partial<SetupOptions>
+  const status = await probeSetupStatus(setupRunner)
+  const options: SetupOptions = {
+    quantize:
+      body.quantize === 4 || body.quantize === 6 ? body.quantize : status.recommendedQuantize,
+    editModel: body.editModel === true,
+  }
+  try {
+    return c.json({ job: setupRunner.start(options, status) })
+  } catch (error) {
+    // 始められない理由（進行中、空き容量、対象外の環境）。サーバの故障ではない
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 409)
+  }
+})
+
+app.post('/api/setup/cancel', (c) => c.json({ cancelled: setupRunner.cancel() }))
 
 app.get('/api/graph', (c) => c.json(toProvJsonLd(graph)))
 
@@ -781,6 +829,9 @@ app.post('/api/rerun', async (c) => {
   } catch (error) {
     // 設定と指示の組み合わせの問題であって、サーバの故障ではない
     if (error instanceof SynthesisForbiddenError) return c.json({ error: error.message }, 400)
+    if (error instanceof ImageCommandMissingError) {
+      return c.json({ error: error.message, code: error.code }, 503)
+    }
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
   }
 })
@@ -1283,6 +1334,10 @@ app.post('/api/generate', async (c) => {
       return c.json({ error: error.message }, 400)
     }
     const why = error instanceof Error ? error.message : String(error)
+    // 生成器が無いのは設定不足。画面はこの印を見て導入へ誘導する（D-029）
+    if (error instanceof ImageCommandMissingError) {
+      return c.json({ error: why, code: error.code }, 503)
+    }
     return c.json({ error: why }, 500)
   }
 })
