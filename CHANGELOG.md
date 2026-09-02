@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.21](https://github.com/kumagallium/PROVision/compare/v0.2.20...v0.2.21) - 2026-09-02
+
+- fix(bundle): 同梱する uv を externalBin に移し、本体と同じ署名を受けるようにする by @kumagallium in https://github.com/kumagallium/PROVision/pull/62
+
 ## [v0.2.20](https://github.com/kumagallium/PROVision/compare/v0.2.19...v0.2.20) - 2026-09-02
 
 - feat(setup): 画像生成環境を設定画面のボタン一つで入れる by @kumagallium in https://github.com/kumagallium/PROVision/pull/59
