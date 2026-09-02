@@ -35,12 +35,12 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/provision-server"
+      "binaries/provision-server",
+      "binaries/uv"
     ],
     "resources": [
       "sidecar/server.mjs",
-      "sidecar/node*",
-      "sidecar/uv*"
+      "sidecar/node*"
     ],
     "createUpdaterArtifacts": true
   },

@@ -1192,6 +1192,11 @@ GUI から起動されると PATH が /usr/bin:/bin 程度しか無く、Homebre
 node と同じく取得スクリプトで置き、版と sha256 を固定する。同梱が無い開発中は、
 手元の uv（`~/.local/bin`、Homebrew）を絶対パスで探し、それも無ければ brew で入れる。
 
+**置き場は Resources ではなく externalBin。** Resources に置いた uv は Tauri が署名せず、
+公証が「Developer ID で署名されていない・hardened runtime が無い」と弾いた（v0.2.20 の
+ビルドで実測。node が通っていたのは Node.js 側が署名済みの実行ファイルを配っているから）。
+externalBin は本体と同じ `Contents/MacOS` に置かれ、本体と同じ署名を受ける。
+
 **進み具合は取り直して読む**
 
 SSE で流す案は捨てた。Tauri の fetch でストリーミングが確実に動くかを確かめる
