@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_STEPS,
+  ImageCommandMissingError,
   cacheKeyOf,
+  mfluxBinPath,
   modelIdOf,
   resolveImageCommand,
   resolveImageCommandForModel,
   resolveImageEditCommand,
+  savedModelPath,
 } from './mflux.js'
 
 const TEMPLATE =
@@ -124,5 +127,28 @@ describe('編集モデルの識別子', () => {
     )
     expect(onTheFly).toBe('flux2-klein-4b-q8')
     expect(preSaved).toBe(onTheFly)
+  })
+})
+
+describe('置き場の取り決め（導入と同じ前提を共有する / D-029）', () => {
+  it('モデルは provision を先に、前身の geologo を後に探す', () => {
+    const only = (dir: string) => (path: string) => path === `/Users/x/.cache/${dir}/z-image-turbo-6bit`
+    expect(savedModelPath('z-image-turbo-6bit', only('provision'), '/Users/x')).toBe(
+      '/Users/x/.cache/provision/z-image-turbo-6bit',
+    )
+    expect(savedModelPath('z-image-turbo-6bit', only('geologo'), '/Users/x')).toBe(
+      '/Users/x/.cache/geologo/z-image-turbo-6bit',
+    )
+    expect(savedModelPath('z-image-turbo-6bit', () => false, '/Users/x')).toBeNull()
+  })
+
+  it('実行ファイルは uv tool install の置き場（~/.local/bin）', () => {
+    expect(mfluxBinPath('mflux-save', '/Users/x')).toBe('/Users/x/.local/bin/mflux-save')
+  })
+
+  it('生成器が無いエラーは印を持つ。画面は文言ではなく印で導入へ誘導する', () => {
+    const error = new ImageCommandMissingError()
+    expect(error.code).toBe('image-command-missing')
+    expect(error.message).toContain('画像生成コマンドが見つからない')
   })
 })

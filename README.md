@@ -40,6 +40,10 @@ pnpm typecheck   # tsc --noEmit
 # 動作確認用のサンプルグラフを書き出す
 pnpm tsx scripts/make-sample.ts data/sample.provision.jsonld
 
+# 画像生成に使う mflux を入れる。版は固定する（下の「画面から入れる」と同じ組み合わせ）
+brew install uv
+uv tool install --python 3.13 mflux==0.18.1 --with mlx==0.31.2
+
 # 実際に画像を生成しながら派生グラフを作る（mflux の量子化済み z-image-turbo が要る）
 pnpm tsx scripts/generate-lineage.ts
 
@@ -71,6 +75,26 @@ M1 Max / 768px / 8step / 同一 seed での実測:
 | 5bit | 8.35GB | 6.7GB | 4bit の改善ではなく別の絵が出る |
 | 6bit | 9.12GB | 7.9GB | 8bit と見分けがつかない。**推奨** |
 | 8bit | 10.65GB | 10GB | 6bit と同じ絵。払い損 |
+
+### 画面から入れる（デスクトップ版）
+
+初めての Mac では、設定の「画像生成」タブに何が足りないかが出る（生成が失敗したときの
+エラーからも飛べる）。「足りないものを入れる」を押すと、uv → mflux → 量子化済みモデルの
+順に、**無いものだけ**を入れる。入っているものは触らない。
+
+- uv はアプリに同梱してある（`scripts/fetch-uv.mjs`）。GUI から起動したアプリには
+  PATH がほぼ無く、Homebrew の uv が見えないため。同梱が無い開発中（`pnpm dev`）は
+  手元の uv を絶対パスで探し、それも無ければ `brew install uv` を走らせる
+- mflux / mlx / Python の版は固定してある（`src/server/setup.ts` の `PINNED`）。
+  版が違えば絵が変わりうるので（D-015）、「最新を入れる」導入にはしない
+- モデルは `<名前>.partial` に保存してから本来の名前へ動かす。途中で落ちた半端な
+  ディレクトリを「ある」と見なさないため
+- 量子化は搭載メモリで選ぶ（18GB 以上なら 6bit、それ未満は 4bit）。選び直せる。
+  どの量子化でも生成モデルが既にあれば、別の量子化を黙って足さない
+- 元モデルの取得（約 33GB）は回線次第で数十分かかる。アプリを閉じると止まるが、
+  Hugging Face のキャッシュが続きから再開する
+
+`PROVISION_IMAGE_COMMAND` を指しているときは、ここからは触らない。
 
 ### 編集モデルも事前保存する
 

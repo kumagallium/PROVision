@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AI_PROVIDERS } from '../ai/provider.js'
 import { apiFetch, isTauri } from './api-base.js'
+import type { JobState as SetupJob, SetupStatus, StepStatus } from '../server/setup.js'
 import { PALETTE } from './palette.js'
 import { appVersion, checkUpdate, installAndRelaunch, type UpdateInfo } from './updater.js'
 
@@ -56,13 +57,30 @@ const EMPTY_AI_DRAFT: AiModelDraft = {
   apiBase: 'http://127.0.0.1:11434/v1',
 }
 
-type SettingsTab = 'general' | 'ai' | 'about'
+export type SettingsTab = 'general' | 'image' | 'ai' | 'about'
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'general', label: '一般' },
+  { id: 'image', label: '画像生成' },
   { id: 'ai', label: 'AI' },
   { id: 'about', label: 'アプリ情報' },
 ]
+
+/** 導入にかかっている時間。取得中は出力が止まって見えるので、動いていることの目印に出す */
+function elapsedLabel(startedAt: string, endedAt?: string): string {
+  const ms = (endedAt ? new Date(endedAt).getTime() : Date.now()) - new Date(startedAt).getTime()
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** 導入の各段階の印（D-029） */
+const STEP_GLYPH: Record<StepStatus, string> = {
+  pending: '○',
+  running: '●',
+  done: '✓',
+  skipped: '－',
+  failed: '✗',
+}
 
 const LABEL: React.CSSProperties = {
   display: 'block',
@@ -107,6 +125,7 @@ export function SettingsDialog({
   onWorkspaceChanged,
   update,
   onUpdateChecked,
+  initialTab = 'general',
 }: {
   onClose: () => void
   /** 保存先が変わったら、サイドカーを入れ直してグラフを読み直してもらう */
@@ -114,8 +133,17 @@ export function SettingsDialog({
   /** 起動時の自動確認で見つかっていた更新（無ければ null） */
   update: UpdateInfo | null
   onUpdateChecked: (update: UpdateInfo | null) => void
+  /** 開いたときに出すタブ。生成のエラーからは「画像生成」へ直行する（D-029） */
+  initialTab?: SettingsTab
 }) {
-  const [tab, setTab] = useState<SettingsTab>('general')
+  const [tab, setTab] = useState<SettingsTab>(initialTab)
+  const [setup, setSetup] = useState<SetupStatus | null>(null)
+  const [setupError, setSetupError] = useState<string | null>(null)
+  /** null なら推奨に従う。利用者が選び直したときだけ値を持つ */
+  const [quantizeChoice, setQuantizeChoice] = useState<4 | 6 | null>(null)
+  const [wantEditModel, setWantEditModel] = useState(false)
+  const [setupStarting, setSetupStarting] = useState(false)
+  const setupLogRef = useRef<HTMLPreElement | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [identity, setIdentity] = useState<Identity>({ name: '', email: '' })
   const [forbidSynthesis, setForbidSynthesis] = useState(false)
@@ -194,6 +222,47 @@ export function SettingsDialog({
     [],
   )
 
+  /**
+   * 「画像生成」タブを開いている間だけ状態を読む。導入が走っている間は 1.5 秒ごとに
+   * 取り直す——進み具合はサーバが持っていて、画面はそれを写すだけ（D-029）
+   */
+  const setupRunning = setup?.job?.status === 'running'
+  useEffect(() => {
+    if (tab !== 'image') return
+    let stopped = false
+    const load = () =>
+      apiFetch('api/setup/status')
+        .then(async (response) => {
+          const value = (await response.json()) as SetupStatus & { error?: string }
+          if (!response.ok) throw new Error(value.error ?? '導入の状態を読めません')
+          if (!stopped) setSetup(value)
+        })
+        .catch((e: unknown) => {
+          if (!stopped) setSetupError(e instanceof Error ? e.message : String(e))
+        })
+    void load()
+    // まだ一度も読めていない間も取り直す。起動直後にサイドカーが応答しないと、
+    // 開き直すまで何も出ないままになる
+    if (!setupRunning && setup !== null) {
+      return () => {
+        stopped = true
+      }
+    }
+    const timer = window.setInterval(() => void load(), 1500)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [tab, setupRunning, setup === null])
+
+  // ログは末尾を追う。進捗バーは最後の行が書き換わり続ける
+  const setupLogLength = setup?.job?.log.length ?? 0
+  const setupLogLast = setup?.job?.log[setupLogLength - 1]
+  useEffect(() => {
+    const element = setupLogRef.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [setupLogLength, setupLogLast])
+
   async function pickFolder() {
     if (!isTauri()) return
     try {
@@ -237,6 +306,37 @@ export function SettingsDialog({
     } catch (e: unknown) {
       setUpdateState('idle')
       setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function startSetup() {
+    if (!setup) return
+    setSetupStarting(true)
+    setSetupError(null)
+    try {
+      const response = await apiFetch('api/setup/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quantize: quantizeChoice ?? setup.recommendedQuantize,
+          editModel: wantEditModel,
+        }),
+      })
+      const value = (await response.json()) as { job?: SetupJob; error?: string }
+      if (!response.ok) throw new Error(value.error ?? '導入を始められません')
+      setSetup((current) => (current && value.job ? { ...current, job: value.job } : current))
+    } catch (e: unknown) {
+      setSetupError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSetupStarting(false)
+    }
+  }
+
+  async function cancelSetup() {
+    try {
+      await apiFetch('api/setup/cancel', { method: 'POST' })
+    } catch (e: unknown) {
+      setSetupError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -466,6 +566,51 @@ export function SettingsDialog({
     }
   }
 
+  const chosenQuantize: 4 | 6 = quantizeChoice ?? setup?.recommendedQuantize ?? 6
+  /** 足りないものの分だけ数える。揃っているものは触らないので、その分の空きは要らない */
+  const setupRequiredGB = setup
+    ? (setup.generateModel.found ? 0 : setup.requiredGB.generate[chosenQuantize]) +
+      (wantEditModel && !setup.editModel.found ? setup.requiredGB.edit : 0)
+    : 0
+  const setupComplete = Boolean(setup?.ready && (!wantEditModel || setup.editModel.found))
+  /** ここから触ってよい環境か。対象外の環境と、環境変数で自分で管理している人は除く */
+  const setupEditable = Boolean(setup && setup.supported && !setup.managedByEnv)
+  const canStartSetup = setupEditable && !setupComplete && !setupRunning
+  const setupRows = setup
+    ? [
+        {
+          label: 'uv',
+          ok: setup.uv.found,
+          detail: setup.uv.found
+            ? `${setup.uv.path ?? ''}${setup.uv.source === 'bundled' ? '（アプリに同梱）' : ''}`
+            : setup.uv.brew
+              ? '無し。Homebrew で入れます'
+              : '無し。ターミナルで brew install uv を実行してください',
+        },
+        {
+          label: 'mflux',
+          ok: setup.mflux.found,
+          detail: setup.mflux.found
+            ? (setup.mflux.versions ?? '入っています')
+            : `無し。mflux ${setup.pinned.mflux} / mlx ${setup.pinned.mlx} / Python ${setup.pinned.python} を入れます`,
+        },
+        {
+          label: '生成モデル',
+          ok: setup.generateModel.found,
+          detail: setup.generateModel.found
+            ? (setup.generateModel.path ?? '')
+            : `無し。z-image-turbo を ${chosenQuantize}bit で保存します`,
+        },
+        {
+          label: '編集モデル（任意）',
+          ok: setup.editModel.found,
+          detail: setup.editModel.found
+            ? (setup.editModel.path ?? '')
+            : '無し。無くても生成用で編集できますが、文字が崩れやすくメモリも多く使います',
+        },
+      ]
+    : []
+
   const providerConnections = (() => {
     const groups = new Map<string, RegisteredAiModel>()
     for (const model of aiRegistry?.models ?? []) {
@@ -668,6 +813,242 @@ export function SettingsDialog({
               {saved ? '保存しました' : 'identity を保存'}
             </button>
           </>
+          ) : null}
+
+          {tab === 'image' ? (
+            <>
+              <label style={LABEL}>画像生成の環境</label>
+              <p style={{ fontSize: 12, color: '#5c6b73', margin: '0 0 8px' }}>
+                生成はこの Mac の中で動く mflux と、量子化済みの z-image-turbo で行います。
+                足りないものだけをここから入れられます。入る先は <code>~/.local</code>
+                （uv と mflux）と <code>~/.cache/provision</code>（モデル）。元モデルは Hugging
+                Face から落とし、<code>~/.cache/huggingface</code> に残ります。ログインは要りません。
+              </p>
+              {!setup ? (
+                <p style={{ fontSize: 12, color: '#7b8892' }}>{setupError ?? '確認しています…'}</p>
+              ) : (
+                <>
+                  {setup.managedByEnv ? (
+                    <p style={{ fontSize: 12, color: '#b3541e', margin: '0 0 8px' }}>
+                      PROVISION_IMAGE_COMMAND で指定されているので、ここからは触りません。
+                      {setup.commandTemplate ? (
+                        <code style={{ display: 'block', marginTop: 4, wordBreak: 'break-all' }}>
+                          {setup.commandTemplate}
+                        </code>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {!setup.supported ? (
+                    <p style={{ fontSize: 12, color: '#b3541e', margin: '0 0 8px' }}>
+                      {setup.unsupportedReason}
+                    </p>
+                  ) : null}
+
+                  <div style={{ border: '1px solid #e0e5e8', borderRadius: 8, fontSize: 12.5 }}>
+                    {setupRows.map((row, index) => (
+                      <div
+                        key={row.label}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '18px 130px 1fr',
+                          gap: 8,
+                          padding: '7px 11px',
+                          borderTop: index === 0 ? 'none' : '1px solid #eef1f3',
+                        }}
+                      >
+                        <span style={{ color: row.ok ? PALETTE.image.main : '#a8513f' }}>
+                          {row.ok ? '✓' : '－'}
+                        </span>
+                        <span style={{ fontWeight: 600, color: '#3f4a52' }}>{row.label}</span>
+                        <span style={{ color: '#5c6b73', wordBreak: 'break-all' }}>
+                          {row.detail}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p style={{ fontSize: 11.5, color: '#5c6b73', margin: '8px 0 0' }}>
+                    この Mac: メモリ {setup.memoryGB}GB（{setup.recommendedQuantize}bit を推奨）
+                    {setup.diskFreeGB !== undefined ? ` / 空き ${setup.diskFreeGB}GB` : ''}
+                    {setupRequiredGB > 0 ? ` / 入れるのに約 ${setupRequiredGB}GB` : ''}
+                  </p>
+
+                  {setupEditable && !setupComplete ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: 14,
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        marginTop: 12,
+                      }}
+                    >
+                      {!setup.generateModel.found ? (
+                        <label
+                          style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}
+                        >
+                          量子化
+                          <select
+                            value={chosenQuantize}
+                            onChange={(e) => setQuantizeChoice(e.target.value === '4' ? 4 : 6)}
+                            disabled={setupRunning}
+                            style={{ ...INPUT, width: 'auto', padding: '4px 8px' }}
+                          >
+                            <option value={6}>6bit（推奨。8bit と見分けがつかない）</option>
+                            <option value={4}>4bit（16GB 機向け。灰色のにじみが残る）</option>
+                          </select>
+                        </label>
+                      ) : null}
+                      {!setup.editModel.found ? (
+                        <label
+                          style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={wantEditModel}
+                            onChange={(e) => setWantEditModel(e.target.checked)}
+                            disabled={setupRunning}
+                          />
+                          編集モデルも入れる（約 {setup.requiredGB.edit}GB）
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {setupEditable ? (
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+                      {setupRunning ? (
+                        <button
+                          type="button"
+                          onClick={() => void cancelSetup()}
+                          style={{ ...INPUT_BUTTON, color: '#a8513f' }}
+                        >
+                          中止
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void startSetup()}
+                          disabled={!canStartSetup || setupStarting}
+                          style={{
+                            padding: '8px 16px',
+                            border: 'none',
+                            borderRadius: 8,
+                            background: canStartSetup ? PALETTE.image.main : '#b9c3c9',
+                            color: '#fff',
+                            fontSize: 13,
+                            whiteSpace: 'nowrap',
+                            cursor: canStartSetup ? 'pointer' : 'default',
+                          }}
+                        >
+                          {setupStarting
+                            ? '始めています…'
+                            : setupComplete
+                              ? '揃っています'
+                              : '足りないものを入れる'}
+                        </button>
+                      )}
+                      {!setupComplete && !setupRunning ? (
+                        <span style={{ fontSize: 11.5, color: '#5c6b73' }}>
+                          モデルの取得は回線次第で数十分かかります。アプリを閉じると止まりますが、続きから再開できます。
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {setup.job ? (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        border: `1px solid ${setup.job.status === 'failed' ? '#a8513f' : PALETTE.image.main}`,
+                        borderRadius: 8,
+                        padding: 12,
+                        background: setup.job.status === 'failed' ? '#fbf1ef' : PALETTE.image.bg,
+                      }}
+                    >
+                      <div style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
+                        {setup.job.steps.map((step) => (
+                          <div
+                            key={step.id}
+                            style={{ display: 'grid', gridTemplateColumns: '16px 1fr', gap: 6 }}
+                          >
+                            <span
+                              style={{
+                                color:
+                                  step.status === 'failed'
+                                    ? '#a8513f'
+                                    : step.status === 'done'
+                                      ? PALETTE.image.main
+                                      : '#5c6b73',
+                              }}
+                            >
+                              {STEP_GLYPH[step.status]}
+                            </span>
+                            <span>
+                              {step.label}
+                              {step.detail ? (
+                                <span style={{ color: '#68767e' }}> — {step.detail}</span>
+                              ) : null}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {setup.job.log.length > 0 ? (
+                        <pre
+                          ref={setupLogRef}
+                          style={{
+                            margin: '10px 0 0',
+                            padding: '8px 10px',
+                            maxHeight: 200,
+                            overflow: 'auto',
+                            background: '#1f2a30',
+                            color: '#d9e2e7',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            lineHeight: 1.45,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          {setup.job.log.slice(-16).join('\n')}
+                        </pre>
+                      ) : null}
+                      <p
+                        style={{
+                          fontSize: 12,
+                          margin: '8px 0 0',
+                          color:
+                            setup.job.status === 'failed'
+                              ? '#a8513f'
+                              : setup.job.status === 'done'
+                                ? PALETTE.image.text
+                                : '#5c6b73',
+                        }}
+                      >
+                        {setup.job.status === 'running'
+                          ? `進めています…（経過 ${elapsedLabel(setup.job.startedAt)}）`
+                          : setup.job.status === 'done'
+                            ? `揃いました（${elapsedLabel(setup.job.startedAt, setup.job.endedAt)}）。右のチャットから生成できます。`
+                            : setup.job.status === 'cancelled'
+                              ? '中止しました。'
+                              : `失敗しました: ${setup.job.error ?? ''}`}
+                      </p>
+                      {setup.job.status === 'running' &&
+                      setup.job.steps.some(
+                        (step) => step.status === 'running' && step.id.endsWith('-model'),
+                      ) ? (
+                        <p style={{ fontSize: 11.5, color: '#5c6b73', margin: '4px 0 0' }}>
+                          元モデルの取得中は、表示が長く止まって見えることがあります。
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {setupError ? (
+                    <p style={{ fontSize: 12, color: '#a8513f', margin: '8px 0 0' }}>{setupError}</p>
+                  ) : null}
+                </>
+              )}
+            </>
           ) : null}
 
           {tab === 'ai' ? (

@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm dev:web",
-    "beforeBuildCommand": "node scripts/fetch-node.mjs && node scripts/bundle-server.mjs && pnpm build:web"
+    "beforeBuildCommand": "node scripts/fetch-node.mjs && node scripts/fetch-uv.mjs && node scripts/bundle-server.mjs && pnpm build:web"
   },
   "app": {
     "windows": [
@@ -39,7 +39,8 @@
     ],
     "resources": [
       "sidecar/server.mjs",
-      "sidecar/node*"
+      "sidecar/node*",
+      "sidecar/uv*"
     ],
     "createUpdaterArtifacts": true
   },

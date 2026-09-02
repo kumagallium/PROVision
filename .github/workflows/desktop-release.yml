@@ -75,6 +75,10 @@ jobs:
       - name: Bundle Node.js runtime for sidecar
         run: node scripts/fetch-node.mjs
 
+      # 画面からの導入（D-029）が使う uv。版と sha256 はスクリプトに固定してある
+      - name: Bundle uv for the in-app image setup
+        run: node scripts/fetch-uv.mjs
+
       - name: Bundle server
         run: node scripts/bundle-server.mjs
 
