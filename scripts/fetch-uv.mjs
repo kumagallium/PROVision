@@ -1,9 +1,14 @@
 /**
- * uv を取得して src-tauri/sidecar/ に置く（D-029）。
+ * uv を取得して src-tauri/binaries/ に置く（D-029）。
  *
  * 画面からの導入は uv で mflux を入れる。アプリに同梱するのは:
  *   - GUI から起動されると PATH が /usr/bin:/bin 程度で、Homebrew の uv が見えない
  *   - アプリの中から `curl | sh` を走らせたくない。何が入るかを配布側で決められない
+ *
+ * 置き場は Resources ではなく externalBin（`binaries/uv-<target triple>`）。
+ * Resources に置いた実行ファイルは Tauri が署名せず、公証が「Developer ID で署名されて
+ * いない・hardened runtime が無い」と弾く（v0.2.20 で実測）。externalBin は本体と同じ
+ * 場所に置かれ、本体と同じ署名を受ける。
  *
  * 版と sha256 を固定する。上げるときは両方を書き換える（sha256 は GitHub Release の
  * `<asset>.sha256` から）。scripts/fetch-node.mjs と同じ作り。
@@ -32,9 +37,9 @@ const SHA256 = {
   'x86_64-pc-windows-msvc': 'ddbfcee1ac615a0499f6aa97b5ec8ebdf3ee4a7714a48055ec2ba0030e3cf810',
   'aarch64-pc-windows-msvc': 'd3360363a3cb671f2c854f4ef48cf4a57fe8664f8ec6a248076d68b797a8acc0',
 }
-const SIDECAR_DIR = join(PROJECT_ROOT, 'src-tauri', 'sidecar')
-/** 置いた版の目印。`sidecar/uv*` の glob に掛からないよう、名前を uv で始めない */
-const VERSION_MARKER = join(SIDECAR_DIR, '.uv-version')
+const BINARIES_DIR = join(PROJECT_ROOT, 'src-tauri', 'binaries')
+/** 置いた版の目印。externalBin の glob に掛からないよう、名前を uv で始めない */
+const VERSION_MARKER = join(BINARIES_DIR, '.uv-version')
 
 const force = process.argv.includes('--force')
 
@@ -45,10 +50,11 @@ if (!isWindows && !isMac) {
   process.exit(1)
 }
 
+/** Tauri の externalBin 命名規則に合わせた host target triple（fetch-node.mjs と同じ） */
 const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
 const target = isMac ? `${arch}-apple-darwin` : `${arch}-pc-windows-msvc`
 const exe = isWindows ? '.exe' : ''
-const placed = join(SIDECAR_DIR, `uv${exe}`)
+const placed = join(BINARIES_DIR, `uv-${target}${exe}`)
 
 const placedVersion = existsSync(VERSION_MARKER)
   ? readFileSync(VERSION_MARKER, 'utf8').trim()
@@ -58,12 +64,12 @@ if (!force && existsSync(placed) && placedVersion === UV_VERSION) {
   process.exit(0)
 }
 
-mkdirSync(SIDECAR_DIR, { recursive: true })
+mkdirSync(BINARIES_DIR, { recursive: true })
 
 const ext = isWindows ? 'zip' : 'tar.gz'
 const asset = `uv-${target}.${ext}`
 const url = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset}`
-const work = join(SIDECAR_DIR, '.download-uv')
+const work = join(BINARIES_DIR, '.download-uv')
 
 rmSync(work, { recursive: true, force: true })
 mkdirSync(work, { recursive: true })

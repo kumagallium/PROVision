@@ -82,9 +82,10 @@ M1 Max / 768px / 8step / 同一 seed での実測:
 エラーからも飛べる）。「足りないものを入れる」を押すと、uv → mflux → 量子化済みモデルの
 順に、**無いものだけ**を入れる。入っているものは触らない。
 
-- uv はアプリに同梱してある（`scripts/fetch-uv.mjs`）。GUI から起動したアプリには
-  PATH がほぼ無く、Homebrew の uv が見えないため。同梱が無い開発中（`pnpm dev`）は
-  手元の uv を絶対パスで探し、それも無ければ `brew install uv` を走らせる
+- uv はアプリに同梱してある（`scripts/fetch-uv.mjs` が `src-tauri/binaries/` に置き、
+  externalBin として本体と一緒に署名される）。GUI から起動したアプリには PATH がほぼ無く、
+  Homebrew の uv が見えないため。同梱が無い開発中（`pnpm dev`）は手元の uv を絶対パスで
+  探し、それも無ければ `brew install uv` を走らせる
 - mflux / mlx / Python の版は固定してある（`src/server/setup.ts` の `PINNED`）。
   版が違えば絵が変わりうるので（D-015）、「最新を入れる」導入にはしない
 - モデルは `<名前>.partial` に保存してから本来の名前へ動かす。途中で落ちた半端な

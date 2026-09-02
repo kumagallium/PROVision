@@ -207,14 +207,18 @@ fn start_sidecar(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // 同梱した uv があれば場所を教える（D-029）。無ければ何も渡さず、サーバ側が
-    // 手元の uv（~/.local/bin や Homebrew）を絶対パスで探す。開発中（pnpm dev）はそちらになる
-    let uv_name = if cfg!(windows) { "sidecar/uv.exe" } else { "sidecar/uv" };
-    if let Ok(uv) = app.path().resolve(uv_name, tauri::path::BaseDirectory::Resource) {
-        if uv.exists() {
-            log(format!("[sidecar] uv: {}", uv.display()));
-            cmd.env("PROVISION_UV", &uv);
-        }
+    // 同梱した uv があれば場所を教える（D-029）。uv は externalBin として本体と同じ場所
+    // （macOS なら Contents/MacOS）に置かれ、Tauri が Developer ID と hardened runtime で
+    // 署名する。Resources に置くと署名されず、公証で弾かれる（v0.2.20 で実測）。
+    // 無ければ何も渡さず、サーバ側が手元の uv（~/.local/bin や Homebrew）を絶対パスで探す
+    let uv_name = if cfg!(windows) { "uv.exe" } else { "uv" };
+    if let Some(uv) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(uv_name)))
+        .filter(|path| path.exists())
+    {
+        log(format!("[sidecar] uv: {}", uv.display()));
+        cmd.env("PROVISION_UV", &uv);
     }
 
     #[cfg(windows)]
