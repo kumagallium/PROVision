@@ -101,17 +101,37 @@ export function ImageNode({ data, selected }: NodeProps) {
   )
 }
 
-/** 生成（prov:Activity）。見出しは意図——「なぜこの版になったか」が一目で要る */
+/** 清書（実行された全文）。見出しより軽く、行数で刈る。全文はホバーと右の詳細で読める */
+const prompt = (lines: number): React.CSSProperties => ({
+  padding: '0 10px 6px',
+  color: '#3f4a52',
+  fontSize: 11.5,
+  display: '-webkit-box',
+  WebkitLineClamp: lines,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+})
+
+/**
+ * 生成（prov:Activity）。見せるのは**実行された全文（清書）**（D-030）。
+ *
+ * 意図（利用者の生の言葉）を見出しにしていたが、候補は同じ意図から出るので
+ * 兄弟の節点が全部同じ文になり、**候補ごとに違うもの（清書と seed）が隠れていた**。
+ * 意図は指示の節点（D-022）が出す。指示の節点が無い 1 本だけの送信では、
+ * ここに意図も添える——「なぜ」と「何を渡したか」の両方が要る。
+ */
 export function ActivityNode({ data, selected }: NodeProps) {
   const d = data as FlowNodeData
   const c = PALETTE.activity
   const a = d.activity
+  // 指示の節点が意図を出しているなら、ここでは繰り返さない。清書が無ければ意図しか無い
+  const showIntent = !d.planned || !d.prompt
+  const hover = [showIntent ? undefined : d.label, d.prompt].filter(Boolean).join('\n\n') || d.label
   return (
-    <div style={{ ...card(c.main, c.bg, selected === true), width: 220 }}>
+    <div style={{ ...card(c.main, c.bg, selected === true), width: 220 }} title={hover}>
       <Handle type="target" position={Position.Top} />
-      <div style={title(c.text, 3)} title={d.label}>
-        {d.label}
-      </div>
+      {showIntent ? <div style={title(c.text, d.prompt ? 2 : 3)}>{d.label}</div> : null}
+      {d.prompt ? <div style={prompt(showIntent ? 3 : 4)}>{d.prompt}</div> : null}
       {a ? (
         <div style={{ padding: '0 10px 8px', color: '#5c6b73', fontSize: 11 }}>
           seed {a.seed} · {a.model}
