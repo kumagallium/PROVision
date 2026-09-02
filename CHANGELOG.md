@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.20](https://github.com/kumagallium/PROVision/compare/v0.2.19...v0.2.20) - 2026-09-02
+
+- feat(setup): 画像生成環境を設定画面のボタン一つで入れる by @kumagallium in https://github.com/kumagallium/PROVision/pull/59
+
 ## [v0.2.19](https://github.com/kumagallium/PROVision/compare/v0.2.18...v0.2.19) - 2026-08-28
 
 - fix(image): 清書を文字消しの定型文で置き換えない by @kumagallium in https://github.com/kumagallium/PROVision/pull/56
