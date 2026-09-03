@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import { sha256 } from '../prov/sha256.js'
+import { ToolMissingError } from './tool-missing.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -27,9 +28,12 @@ export function inpaintCacheKeyOf(input: InpaintInput, model = 'big-lama'): stri
   return sha256([input.imageDigest, input.maskDigest, model].join('\u0000')).slice(0, 32)
 }
 
-export function suggestInpaintCommand(): string | null {
-  const bin = join(homedir(), '.local', 'bin', 'iopaint')
-  if (!existsSync(bin)) return null
+export function suggestInpaintCommand(
+  exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
+): string | null {
+  const bin = join(home, '.local', 'bin', 'iopaint')
+  if (!exists(bin)) return null
   const device = process.arch === 'arm64' ? 'mps' : 'cpu'
   return [
     bin,
@@ -46,9 +50,9 @@ export function resolveInpaintCommand(env: NodeJS.ProcessEnv = process.env): str
   const configured = env.PROVISION_INPAINT_COMMAND?.trim()
   const template = configured || suggestInpaintCommand()
   if (!template) {
-    throw new Error(
-      '選択範囲を自然に消すにはLaMaが必要です。' +
-        '`uv tool install --python 3.10 iopaint` を実行してください',
+    throw new ToolMissingError(
+      '選択範囲を自然に消すには LaMa（IOPaint）が要ります。設定の「画像生成」から入れられます' +
+        '（自分で入れるなら `uv tool install --python 3.10 iopaint`）',
     )
   }
   for (const placeholder of ['{image}', '{mask}']) {

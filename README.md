@@ -47,11 +47,11 @@ uv tool install --python 3.13 mflux==0.18.1 --with mlx==0.31.2
 # 実際に画像を生成しながら派生グラフを作る（mflux の量子化済み z-image-turbo が要る）
 pnpm tsx scripts/generate-lineage.ts
 
-# 選択範囲から物体・文字を消すLaMaを導入する（初回実行時に約196MBを取得）
-uv tool install --python 3.10 iopaint
+# 選択範囲から物体・文字を消すLaMaを導入する（重みは初回に約196MBを取得）
+uv tool install --python 3.10 iopaint==1.6.0
 
 # 「背景を透明にして」を使う場合だけrembgを導入する
-uv tool install --python 3.11 "rembg[cpu,cli]"
+uv tool install --python 3.11 "rembg[cpu,cli]==2.0.83"
 ```
 
 生成は直列で 1 枚 1〜2 分。途中で落ちても `data/run/cache/` から続きを走る
@@ -96,6 +96,15 @@ M1 Max / 768px / 8step / 同一 seed での実測:
   Hugging Face のキャッシュが続きから再開する
 
 `PROVISION_IMAGE_COMMAND` を指しているときは、ここからは触らない。
+
+**範囲の消去（LaMa）と背景の透明化（rembg）も同じボタンで入る。** 任意なので、
+要る人だけチェックを入れる（約 1.5GB と約 0.8GB）。重みも導入で取りに行くので、
+最初の 1 回だけ黙って数分待たされることがない。LaMa には重みだけを落とす口が無いため、
+32x32 の画像を 1 枚消させて取りに行かせる（走らせるのは本番と同じコマンド）。
+
+**rembg はモデルを名指しして呼ぶ**（`rembg i -m u2net`）。名指ししないと版ごとの既定で走り、
+2.0.83 では 1.02GB の bria-rmbg（非商用ライセンス）が落ちてきて、
+来歴には `rembg (U²-Net)` と書かれる——記録と実物が食い違う（実測）。
 
 ### 編集モデルも事前保存する
 

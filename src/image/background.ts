@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { sha256 } from '../prov/sha256.js'
 import type { GenerateResult } from './mflux.js'
+import { ToolMissingError } from './tool-missing.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -20,7 +21,19 @@ export function backgroundRemovalCacheKeyOf(input: BackgroundRemovalInput): stri
   return sha256(['background.remove', input.imageDigest, command].join('\u0000')).slice(0, 32)
 }
 
-export function resolveBackgroundRemovalCommand(env: NodeJS.ProcessEnv = process.env): string {
+/**
+ * 使うモデルを**名指しする**。rembg の既定は版で変わり、2.0.83 では
+ * bria-rmbg（1.02GB・非商用ライセンス）になっていた——**黙って別のモデルで走り**、
+ * 来歴には `rembg (U²-Net)` と書かれる（実測）。名指しすれば、記録と実物が一致する。
+ * U²-Net は Apache-2.0 で、176MB で済む。
+ */
+export const BACKGROUND_MODEL = 'u2net'
+
+export function resolveBackgroundRemovalCommand(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
+): string {
   const configured = env.PROVISION_BACKGROUND_COMMAND?.trim()
   if (configured) {
     if (!configured.includes('{image}') || !configured.includes('{out}')) {
@@ -28,11 +41,11 @@ export function resolveBackgroundRemovalCommand(env: NodeJS.ProcessEnv = process
     }
     return configured
   }
-  const bin = join(homedir(), '.local', 'bin', 'rembg')
-  if (existsSync(bin)) return `${bin} i {image} {out}`
-  throw new Error(
-    '背景を透明化するにはrembgが必要です。' +
-      '`uv tool install --python 3.11 "rembg[cpu,cli]"` を実行してください',
+  const bin = join(home, '.local', 'bin', 'rembg')
+  if (exists(bin)) return `${bin} i -m ${BACKGROUND_MODEL} {image} {out}`
+  throw new ToolMissingError(
+    '背景を透明化するには rembg が要ります。設定の「画像生成」から入れられます' +
+      '（自分で入れるなら `uv tool install --python 3.11 "rembg[cpu,cli]"`）',
   )
 }
 
@@ -74,7 +87,12 @@ export function backgroundRemovalModelOf(template: string): string {
   const explicit = /(?:--model|-m)\s+(\S+)/.exec(template)?.[1]
   if (explicit) return explicit
   const executable = template.trim().split(/\s+/)[0]?.split('/').pop()
+  /**
+   * 名指ししていない rembg は、**その版の既定**で走る。かつて u2net と決め打っていたが、
+   * 2.0.83 の既定は bria-rmbg だった（実測）——決め打つと記録が嘘になる。
+   * 既定が何であるかは版に依るので、そう書く（こちらの既定コマンドは必ず名指しする）
+   */
   return executable === 'rembg'
-    ? 'u2net'
+    ? 'rembg-default'
     : `custom-${sha256(template).slice(0, 12)}`
 }

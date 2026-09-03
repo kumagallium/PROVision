@@ -13,6 +13,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { sha256 } from '../prov/sha256.js'
+import { ToolMissingError } from './tool-missing.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -118,10 +119,11 @@ export function savedModelPath(
 }
 
 /**
- * `uv tool install` が実行ファイルを置く場所。導入（D-029）もここを前提にするので、
+ * `uv tool install` が実行ファイルを置く場所。mflux も iopaint も rembg もここに入る。
+ * 導入（D-029）が `UV_TOOL_BIN_DIR` で固定している先と**同じ場所を指す**ので、
  * 置き場を変えるならこの 1 か所で変える。
  */
-export function mfluxBinPath(name: string, home: string = homedir()): string {
+export function uvToolBinPath(name: string, home: string = homedir()): string {
   return join(home, '.local', 'bin', name)
 }
 
@@ -147,7 +149,7 @@ export function findSavedModel(
  * {imageStrength} {out} を差し替える。{image} は親画像を編集するときだけ使う。
  */
 export function suggestImageCommand(): string | null {
-  const bin = mfluxBinPath('mflux-generate-z-image-turbo')
+  const bin = uvToolBinPath('mflux-generate-z-image-turbo')
   const saved = findSavedModel()
   if (!existsSync(bin) || !saved) return null
   return [
@@ -170,7 +172,7 @@ export function suggestImageCommand(): string | null {
  * --image-paths が必須）。汎用の生成モデルで編集させると文字が崩れる実測がある。
  */
 export function suggestImageEditCommand(): string | null {
-  const bin = mfluxBinPath('mflux-generate-flux2-edit')
+  const bin = uvToolBinPath('mflux-generate-flux2-edit')
   if (!existsSync(bin)) return null
   const tail = [
     '--image-paths {image}',
@@ -247,11 +249,9 @@ function checkTemplate(template: string): string {
 
 /**
  * 生成器が手元に無い。設定不足であって故障ではないので、画面はここから導入へ誘導する（D-029）。
- * `code` は API の応答に載せる。文言で判定させると、文言を直した瞬間に誘導が消える。
+ * 印（`code`）は親が持つ——rembg や IOPaint が無いときと**同じ印**で誘導したい。
  */
-export class ImageCommandMissingError extends Error {
-  readonly code = 'image-command-missing' as const
-
+export class ImageCommandMissingError extends ToolMissingError {
   constructor() {
     super(
       '画像生成コマンドが見つからない。設定の「画像生成」から導入するか、' +

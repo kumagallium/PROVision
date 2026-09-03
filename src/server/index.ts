@@ -25,7 +25,6 @@ import { sha256 } from '../prov/sha256.js'
 import { toProvJsonLd } from '../prov/jsonld.js'
 import {
   DEFAULT_STEPS,
-  ImageCommandMissingError,
   cacheKeyOf,
   generateImage,
   modelIdOf,
@@ -34,6 +33,7 @@ import {
   type GenerateResult,
 } from '../image/mflux.js'
 import { probePlatform } from '../image/environment.js'
+import { ToolMissingError } from '../image/tool-missing.js'
 import { addSoftwareAgent, commandTemplateOf, probeToolEnvironment } from './agents.js'
 import {
   SetupRunner,
@@ -854,7 +854,7 @@ app.post('/api/rerun', async (c) => {
   } catch (error) {
     // 設定と指示の組み合わせの問題であって、サーバの故障ではない
     if (error instanceof SynthesisForbiddenError) return c.json({ error: error.message }, 400)
-    if (error instanceof ImageCommandMissingError) {
+    if (error instanceof ToolMissingError) {
       return c.json({ error: error.message, code: error.code }, 503)
     }
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
@@ -1041,7 +1041,7 @@ app.post('/api/regenerate', async (c) => {
       )
     }
     if (error instanceof SynthesisForbiddenError) return c.json({ error: error.message }, 400)
-    if (error instanceof ImageCommandMissingError) {
+    if (error instanceof ToolMissingError) {
       return c.json({ error: error.message, code: error.code }, 503)
     }
     return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
@@ -1547,7 +1547,7 @@ app.post('/api/generate', async (c) => {
     }
     const why = error instanceof Error ? error.message : String(error)
     // 生成器が無いのは設定不足。画面はこの印を見て導入へ誘導する（D-029）
-    if (error instanceof ImageCommandMissingError) {
+    if (error instanceof ToolMissingError) {
       return c.json({ error: why, code: error.code }, 503)
     }
     return c.json({ error: why }, 500)
