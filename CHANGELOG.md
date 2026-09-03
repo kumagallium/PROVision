@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.24](https://github.com/kumagallium/PROVision/compare/v0.2.23...v0.2.24) - 2026-09-03
+
+- feat(ui): 気に入らない版を消さずに「よけておく」 by @kumagallium in https://github.com/kumagallium/PROVision/pull/68
+
 ## [v0.2.23](https://github.com/kumagallium/PROVision/compare/v0.2.22...v0.2.23) - 2026-09-03
 
 - feat(prompt): 清書を自分で書けるようにし、部分を頼むときは全体を名指ししない規則を足す by @kumagallium in https://github.com/kumagallium/PROVision/pull/66
