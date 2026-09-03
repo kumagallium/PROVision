@@ -540,6 +540,47 @@ export class ProvGraph {
     return assertion
   }
 
+  /**
+   * その版をよけておく／戻す（D-032）。**記録は書き換えない。**
+   * 表明を 1 本足すだけで、同じ版への最後の表明が効く（表示名と同じ形）。
+   * 戻すのも「戻した」という表明なので、**よけた事実も残る。**
+   */
+  assertArchived(input: {
+    entity: Iri
+    archived: boolean
+    at: string
+    agents?: Iri[]
+  }): AssertionActivity {
+    if (!this.entities.has(input.entity)) {
+      throw new Error(`その版がグラフに無い: ${input.entity}`)
+    }
+    const id = assertionIri(
+      this.base,
+      `archive ${input.entity} ${input.archived} ${input.at}`,
+    )
+    const assertion: AssertionActivity = {
+      id,
+      kind: 'archive',
+      label: input.archived ? 'よけておく' : 'よけたのを戻す',
+      about: input.entity,
+      referenced: [],
+      archived: input.archived,
+      startedAtTime: input.at,
+      wasAssociatedWith: [...(input.agents ?? [])].sort(),
+    }
+    this.assertions.set(id, assertion)
+    return assertion
+  }
+
+  /** その版をよけてあるか。同じ版への最後の表明が効く */
+  isArchived(entity: Iri): boolean {
+    const latest = this.listAssertions()
+      .filter((a) => a.kind === 'archive' && a.about === entity)
+      .sort((a, b) => a.startedAtTime.localeCompare(b.startedAtTime) || a.id.localeCompare(b.id))
+      .pop()
+    return latest?.archived === true
+  }
+
   /** 会話の表示名。付けていなければ undefined（呼び側が最初の指示に落とす） */
   titleOf(root: Iri): string | undefined {
     const latest = this.listAssertions()

@@ -147,6 +147,18 @@ describe('React Flow への写し取り', () => {
     expect(nodes.filter((n) => n.type === 'activity').every((n) => n.data.planned === false)).toBe(true)
   })
 
+  it('よけた版はグラフから消さず、印を付けるだけ（D-032）', () => {
+    const g = branchingGraph()
+    const v3b = g.listEntities().find((e) => e.label === 'v3b')!
+    g.assertArchived({ entity: v3b.id, archived: true, at: '2026-09-03T11:00:00Z' })
+
+    const { nodes } = toFlow(g)
+    expect(nodes.find((n) => n.id === v3b.id)!.data.archived).toBe(true)
+    // 系譜の途中なら派生元でもある。消すと子が「どこから来たか」を辿れなくなる
+    expect(nodes.filter((n) => n.type === 'image')).toHaveLength(4)
+    expect(nodes.filter((n) => n.data.archived === true)).toHaveLength(1)
+  })
+
   it('画像の置き場所を配信 URL に直す', () => {
     expect(
       imageUrlOf({

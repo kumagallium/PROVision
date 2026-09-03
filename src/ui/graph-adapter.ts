@@ -30,6 +30,8 @@ export interface FlowNodeData {
   planned?: boolean
   /** 別の会話から材料として借りてきた版か（D-021） */
   borrowed?: boolean
+  /** 利用者がよけた版か（D-032）。**グラフからは消さない**——系譜の途中なら派生元でもある */
+  archived?: boolean
   /**
    * 直近の送信で生まれた版か（D-028）。**写しの段階では決めない**——
    * これは記録の性質ではなく画面の状態なので、`toFlow` ではなく描く直前に載せる
@@ -121,6 +123,7 @@ export function toFlow(
         kind: 'image',
         label: entity.label,
         entity,
+        ...(graph.isArchived(entity.id) ? { archived: true } : {}),
         ...(imageUrlOf(entity) ? { imageUrl: imageUrlOf(entity) } : {}),
       },
     })

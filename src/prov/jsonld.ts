@@ -239,6 +239,9 @@ export function toProvJsonLd(graph: ProvGraph): ProvJsonLdDocument {
       startedAtTime: lit(a.startedAtTime, `${XSD}dateTime`),
       used: refs([a.about, ...a.referenced]),
       ...(a.title ? { 'provision:title': lit(a.title) } : {}),
+      ...(a.archived !== undefined
+        ? { 'provision:archived': lit(String(a.archived), `${XSD}boolean`) }
+        : {}),
       ...(a.wasAssociatedWith.length > 0
         ? { wasAssociatedWith: refs(a.wasAssociatedWith) }
         : {}),
@@ -422,11 +425,16 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         .sort()
       const figure = figureByActivity.get(id)
       const title = firstValue(n, 'provision:title')
+      // 真偽値は書き出しで文字列になる。どちらの形で来ても同じに読む
+      const archivedValue = firstValue(n, 'provision:archived')
+      const archived = archivedValue === undefined ? undefined : String(archivedValue) === 'true'
       const kind: AssertionActivity['kind'] = figure
         ? 'publication'
         : title !== undefined
           ? 'title'
-          : 'reference'
+          : archived !== undefined
+            ? 'archive'
+            : 'reference'
       return {
         id,
         kind,
@@ -435,6 +443,7 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
         referenced,
         ...(figure ? { figure } : {}),
         ...(title !== undefined ? { title: String(title) } : {}),
+        ...(archived !== undefined ? { archived } : {}),
         startedAtTime: String(firstValue(n, 'startedAtTime') ?? ''),
         wasAssociatedWith: idList(n, 'wasAssociatedWith').slice().sort(),
       }

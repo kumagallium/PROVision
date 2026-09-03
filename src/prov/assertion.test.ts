@@ -282,3 +282,76 @@ describe('出し直して食い違ったとき', () => {
     expect(toNTriples(g).some((l) => l.includes('#alternateOf'))).toBe(true)
   })
 })
+
+describe('よけておく（D-032）', () => {
+  function graphWithCandidates() {
+    const g = new ProvGraph()
+    const me = g.addAgent('kumagallium', 'kumagallium', 'Person')
+    const common = {
+      prompt: 'p',
+      model: 'm',
+      startedAtTime: '2026-09-03T10:00:00Z',
+      endedAtTime: '2026-09-03T10:00:10Z',
+      agents: [me.id],
+    }
+    const a = g.recordGeneration({ ...common, image: bytes('a'), label: '候補A', seed: 1 })
+    const b = g.recordGeneration({ ...common, image: bytes('b'), label: '候補B', seed: 2 })
+    return { g, me, a, b }
+  }
+
+  it('よけても記録は書き換わらない。表明が 1 本増えるだけ', () => {
+    const { g, me, a } = graphWithCandidates()
+    const before = g.activityThatGenerated(a.id)!
+    g.assertArchived({ entity: a.id, archived: true, at: '2026-09-03T11:00:00Z', agents: [me.id] })
+
+    expect(g.isArchived(a.id)).toBe(true)
+    // 生成の記録も、版そのものも、1 文字も変わっていない
+    expect(g.activityThatGenerated(a.id)).toEqual(before)
+    expect(g.getEntity(a.id)).toBeDefined()
+    // 会話からも消えない。消すのではなく、選ばなかったと言っている
+    expect(g.session(g.rootOf(a.id)!).some((e) => e.id === a.id)).toBe(true)
+    const assertion = g.listAssertions().find((x) => x.kind === 'archive')!
+    expect(assertion.about).toBe(a.id)
+    expect(assertion.wasAssociatedWith).toEqual([me.id])
+  })
+
+  it('戻すのも表明。よけた事実は残る', () => {
+    const { g, a } = graphWithCandidates()
+    g.assertArchived({ entity: a.id, archived: true, at: '2026-09-03T11:00:00Z' })
+    g.assertArchived({ entity: a.id, archived: false, at: '2026-09-03T12:00:00Z' })
+
+    expect(g.isArchived(a.id)).toBe(false)
+    // 「よけた」「戻した」の両方が残る——いつ誰が言ったかが消えては表明にならない（D-008）
+    expect(g.listAssertions().filter((x) => x.kind === 'archive')).toHaveLength(2)
+  })
+
+  it('よけていない版と、そもそも表明の無い版は false', () => {
+    const { g, a, b } = graphWithCandidates()
+    g.assertArchived({ entity: a.id, archived: true, at: '2026-09-03T11:00:00Z' })
+    expect(g.isArchived(b.id)).toBe(false)
+  })
+
+  it('グラフに無い版はよけられない', () => {
+    const { g } = graphWithCandidates()
+    expect(() =>
+      g.assertArchived({ entity: 'https://example.com/nope', archived: true, at: 'x' }),
+    ).toThrow()
+  })
+
+  it('書き出して読み戻しても、よけたままである', () => {
+    const { g, a } = graphWithCandidates()
+    g.assertArchived({ entity: a.id, archived: true, at: '2026-09-03T11:00:00Z' })
+
+    const restored = fromProvJsonLd(toProvJsonLd(g), DEFAULT_BASE)
+    expect(restored.isArchived(a.id)).toBe(true)
+    expect(restored.listAssertions().find((x) => x.kind === 'archive')?.archived).toBe(true)
+    expect(toNTriples(g).some((l) => l.includes('#archived'))).toBe(true)
+  })
+
+  it('会話をまるごと消せば、よけた表明も一緒に消える', () => {
+    const { g, a } = graphWithCandidates()
+    g.assertArchived({ entity: a.id, archived: true, at: '2026-09-03T11:00:00Z' })
+    g.deleteSession(g.rootOf(a.id)!)
+    expect(g.listAssertions().filter((x) => x.kind === 'archive')).toHaveLength(0)
+  })
+})

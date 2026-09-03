@@ -170,6 +170,9 @@ export function toNTriples(graph: ProvGraph): string[] {
       triple(s, iri(`${PROV}wasAssociatedWith`), iri(agent))
     }
     if (a.title) triple(s, iri(`${PROVISION}title`), literal(a.title))
+    if (a.archived !== undefined) {
+      triple(s, iri(`${PROVISION}archived`), literal(String(a.archived), `${XSD}boolean`))
+    }
     if (a.figure) {
       const f = iri(a.figure.id)
       triple(f, iri(`${RDF}type`), iri(`${PROV}Entity`))

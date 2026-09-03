@@ -147,8 +147,9 @@ export interface AssertionActivity {
    * reference: このデータに基づく
    * publication: この figure として載った
    * title: この会話をこう呼ぶことにした
+   * archive: この版はよけておく（D-032）。**消すのではなく、選ばなかったと言う**
    */
-  kind: 'reference' | 'publication' | 'title'
+  kind: 'reference' | 'publication' | 'title' | 'archive'
   label: string
   /** 何についての表明か。画像 Entity の IRI */
   about: Iri
@@ -158,6 +159,8 @@ export interface AssertionActivity {
   figure?: PublishedFigure
   /** kind === 'title' のとき。会話の表示名 */
   title?: string
+  /** kind === 'archive' のとき。よけたなら true、戻したなら false（D-032） */
+  archived?: boolean
   startedAtTime: string
   wasAssociatedWith: Iri[]
 }
