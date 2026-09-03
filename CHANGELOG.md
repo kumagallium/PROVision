@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.23](https://github.com/kumagallium/PROVision/compare/v0.2.22...v0.2.23) - 2026-09-03
+
+- feat(prompt): 清書を自分で書けるようにし、部分を頼むときは全体を名指ししない規則を足す by @kumagallium in https://github.com/kumagallium/PROVision/pull/66
+
 ## [v0.2.22](https://github.com/kumagallium/PROVision/compare/v0.2.21...v0.2.22) - 2026-09-02
 
 - fix(ui): 生成の節点に意図ではなく実行された全文（清書）を出す by @kumagallium in https://github.com/kumagallium/PROVision/pull/64
