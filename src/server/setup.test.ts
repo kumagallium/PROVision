@@ -9,6 +9,7 @@ import {
   huggingFaceHubDir,
   recommendedQuantize,
   requiredDiskGB,
+  requiredGBTable,
   stopOnShutdown,
   uvCandidates,
   type RunnerDeps,
@@ -29,10 +30,12 @@ function statusWith(over: Partial<SetupStatus> = {}): SetupStatus {
     mflux: { found: false },
     generateModel: { found: false },
     editModel: { found: false },
+    inpaint: { found: false },
+    background: { found: false },
     memoryGB: 24,
     recommendedQuantize: 6,
     diskFreeGB: 300,
-    requiredGB: { generate: { 4: 38.5, 6: 40.9 }, edit: 32 },
+    requiredGB: { generate: { 4: 38.5, 6: 40.9 }, edit: 32, inpaint: 1.5, background: 0.8 },
     pinned: PINNED,
     job: null,
     ...over,
@@ -72,6 +75,7 @@ function fakeDeps(initialFiles: readonly string[], behaviour: Behaviour) {
       files.delete(from)
       files.add(to)
     },
+    writeFile: async () => undefined,
     dirSizeBytes: async () => 0,
     onReady: () => {
       readyCalls += 1
@@ -351,6 +355,7 @@ describe('SetupRunner', () => {
         removed.push(path)
       },
       rename: async () => undefined,
+      writeFile: async () => undefined,
       dirSizeBytes: async () => 0,
     }
     const runner = new SetupRunner(deps)
@@ -387,6 +392,7 @@ describe('SetupRunner', () => {
         runner.cancel()
       },
       rename: async () => undefined,
+      writeFile: async () => undefined,
       dirSizeBytes: async () => 0,
     })
     runner.start({ quantize: 6, editModel: false }, statusWith())
@@ -435,6 +441,7 @@ describe('SetupRunner', () => {
       mkdir: async () => undefined,
       remove: async () => undefined,
       rename: async () => undefined,
+      writeFile: async () => undefined,
       dirSizeBytes: async (path) => {
         measured.push(path)
         return 2.5 * 2 ** 30
@@ -500,6 +507,7 @@ describe('stopOnShutdown', () => {
       mkdir: async () => undefined,
       remove: async () => undefined,
       rename: async () => undefined,
+      writeFile: async () => undefined,
       dirSizeBytes: async () => 0,
     })
     const handlers = new Map<string, () => void>()
@@ -519,5 +527,102 @@ describe('stopOnShutdown', () => {
     handlers.get('SIGTERM')!()
     expect(killed).toBe(1)
     expect(exits).toEqual([143])
+  })
+})
+
+describe('任意の道具（範囲の消去・背景の透明化）', () => {
+  const IOPAINT = `${HOME}/.local/bin/iopaint`
+  const REMBG = `${HOME}/.local/bin/rembg`
+  const LAMA = `${HOME}/.cache/torch/hub/checkpoints/big-lama.pt`
+  const U2NET = `${HOME}/.rembg/models/u2net/u2net.onnx`
+
+  /** 道具を入れると実行ファイルが生え、重みを取りに行くと重みが生える偽物 */
+  const installsTools: Behaviour = (bin, args) => {
+    if (bin.endsWith('/uv')) {
+      const spec = args[args.indexOf('install') + 1] === '--python' ? args[4] : ''
+      if (String(spec).startsWith('iopaint')) return { code: 0, creates: [IOPAINT] }
+      if (String(spec).startsWith('rembg')) return { code: 0, creates: [REMBG] }
+      return { code: 0, creates: [GENERATE_BIN, SAVE_BIN] }
+    }
+    if (bin.endsWith('/iopaint')) return { code: 0, creates: [LAMA] }
+    if (bin.endsWith('/rembg')) return { code: 0, creates: [U2NET] }
+    if (bin.endsWith('/mflux-save')) {
+      return { code: 0, creates: [args[args.indexOf('--path') + 1]!] }
+    }
+    return { code: 1 }
+  }
+
+  it('道具と重みを続けて入れる。**重みだけを落とす口が無い LaMa は、本番と同じコマンドで暖機する**', async () => {
+    const fake = fakeDeps(
+      [UV, GENERATE_BIN, SAVE_BIN, `${HOME}/.cache/provision/z-image-turbo-6bit`],
+      installsTools,
+    )
+    const runner = new SetupRunner(fake.deps)
+    runner.start({ quantize: 6, editModel: false, inpaint: true, background: true }, statusWith())
+    await runner.settled()
+
+    const job = runner.current()!
+    expect(job.status).toBe('done')
+    expect(job.steps.map((s) => s.id)).toEqual([
+      'uv',
+      'mflux',
+      'generate-model',
+      'inpaint',
+      'inpaint-model',
+      'background',
+      'background-model',
+    ])
+    const ran = fake.calls.map((c) => [c.bin.split('/').pop(), ...c.args].join(' '))
+    // 版は固定する。python の版はパッケージ側の要求に合わせる
+    expect(ran[0]).toBe(`uv tool install --python ${PINNED.inpaintPython} iopaint==${PINNED.iopaint}`)
+    // 暖機は本番と同じ `iopaint run --model lama`。ここで通れば本番も通る
+    expect(ran[1]).toContain('iopaint run --model lama')
+    expect(ran[1]).toContain('--image')
+    expect(ran[1]).toContain('--mask')
+    expect(ran[2]).toBe(
+      `uv tool install --python ${PINNED.backgroundPython} rembg[cpu,cli]==${PINNED.rembg}`,
+    )
+    // **モデルを名指しして落とす**。名指ししないと版ごとの既定（1GB）を取りに行く
+    expect(ran[3]).toBe('rembg d u2net')
+    // 暖機に使った小さな画像は残さない
+    expect(fake.removed).toContain(`${HOME}/.cache/provision/.warmup`)
+  })
+
+  it('道具も重みも揃っていれば、何も走らせない', async () => {
+    const fake = fakeDeps(
+      [UV, GENERATE_BIN, SAVE_BIN, `${HOME}/.cache/provision/z-image-turbo-6bit`, IOPAINT, LAMA, REMBG, U2NET],
+      installsTools,
+    )
+    const runner = new SetupRunner(fake.deps)
+    runner.start({ quantize: 6, editModel: false, inpaint: true, background: true }, statusWith())
+    await runner.settled()
+
+    expect(runner.current()!.status).toBe('done')
+    expect(runner.current()!.steps.every((s) => s.status === 'skipped')).toBe(true)
+    expect(fake.calls).toEqual([])
+  })
+
+  it('頼まれていない道具は段階に入らない', async () => {
+    const fake = fakeDeps([UV, GENERATE_BIN, SAVE_BIN], installsTools)
+    const runner = new SetupRunner(fake.deps)
+    runner.start({ quantize: 6, editModel: false }, statusWith())
+    await runner.settled()
+    expect(runner.current()!.steps.map((s) => s.id)).toEqual(['uv', 'mflux', 'generate-model'])
+  })
+
+  it('必要な空きは、足りないものと頼まれたものだけ数える', () => {
+    const table = requiredGBTable()
+    expect(
+      requiredDiskGB(
+        { generate: false, edit: false, inpaint: true, background: true },
+        { quantize: 6, editModel: false, inpaint: true, background: true },
+      ),
+    ).toBe(table.inpaint + table.background)
+    expect(
+      requiredDiskGB(
+        { generate: false, edit: false, inpaint: false, background: false },
+        { quantize: 6, editModel: false, inpaint: true, background: true },
+      ),
+    ).toBe(0)
   })
 })

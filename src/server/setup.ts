@@ -20,16 +20,18 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, type Dirent } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat, statfs } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir, totalmem } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   EDIT_MODEL_DIR,
   MODEL_DIRS_BEST_FIRST,
   findSavedModel,
-  mfluxBinPath,
+  uvToolBinPath,
   resolveImageCommand,
 } from '../image/mflux.js'
+import { BACKGROUND_MODEL } from '../image/background.js'
+import { suggestInpaintCommand } from '../image/lama.js'
 import { normalizeHome } from '../image/environment.js'
 import { probeToolEnvironment } from './agents.js'
 
@@ -38,7 +40,17 @@ import { probeToolEnvironment } from './agents.js'
  * mflux 0.18.1 は mlx<0.32 を要求するので、mlx は 0.31 系の最終。
  * 上げるときは README の実測表と一緒に上げる。
  */
-export const PINNED = { python: '3.13', mflux: '0.18.1', mlx: '0.31.2' } as const
+export const PINNED = {
+  python: '3.13',
+  mflux: '0.18.1',
+  mlx: '0.31.2',
+  /** 範囲の消去（LaMa / IOPaint）。python は iopaint 側の要求に合わせる */
+  inpaintPython: '3.10',
+  iopaint: '1.6.0',
+  /** 背景の透明化。**モデルも固定する**——rembg の既定は版で変わる（background.ts） */
+  backgroundPython: '3.11',
+  rembg: '2.0.83',
+} as const
 
 export type Quantize = 4 | 6
 
@@ -46,9 +58,21 @@ export interface SetupOptions {
   quantize: Quantize
   /** 編集特化モデル（flux2-klein-4b の 8bit 保存）も置くか */
   editModel: boolean
+  /** 範囲の消去（LaMa / IOPaint）も入れるか */
+  inpaint?: boolean
+  /** 背景の透明化（rembg / U²-Net）も入れるか */
+  background?: boolean
 }
 
-export type StepId = 'uv' | 'mflux' | 'generate-model' | 'edit-model'
+export type StepId =
+  | 'uv'
+  | 'mflux'
+  | 'generate-model'
+  | 'edit-model'
+  | 'inpaint'
+  | 'inpaint-model'
+  | 'background'
+  | 'background-model'
 export type StepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
 
 export interface StepState {
@@ -90,11 +114,15 @@ export interface SetupStatus {
   mflux: { found: boolean; versions?: string }
   generateModel: { found: boolean; path?: string }
   editModel: { found: boolean; path?: string }
+  /** 範囲の消去（LaMa / IOPaint）。任意 */
+  inpaint: { found: boolean; versions?: string }
+  /** 背景の透明化（rembg / U²-Net）。任意 */
+  background: { found: boolean; versions?: string }
   memoryGB: number
   recommendedQuantize: Quantize
   diskFreeGB?: number
   /** 各要素を入れるのに要る空き（GB）。画面は選んだ組み合わせで足し合わせる */
-  requiredGB: { generate: Record<Quantize, number>; edit: number }
+  requiredGB: { generate: Record<Quantize, number>; edit: number; inpaint: number; background: number }
   pinned: typeof PINNED
   job: JobState | null
 }
@@ -118,6 +146,13 @@ export function huggingFaceHubDir(env: NodeJS.ProcessEnv, home: string): string 
 }
 const SAVED_GB: Record<Quantize, number> = { 4: 5.5, 6: 7.9 }
 const EDIT_SAVED_GB = 8
+/**
+ * 任意の道具の大きさ（GB）。実測（この Mac）:
+ *   iopaint の置き場 1.2GB ＋ LaMa の重み 0.2GB（torch を引くので大きい）
+ *   rembg の置き場 0.55GB ＋ U²-Net 0.18GB
+ */
+const INPAINT_GB = 1.5
+const BACKGROUND_GB = 0.8
 
 export function requiredGBTable(): SetupStatus['requiredGB'] {
   return {
@@ -126,18 +161,22 @@ export function requiredGBTable(): SetupStatus['requiredGB'] {
       6: DOWNLOAD_GB['z-image-turbo'] + SAVED_GB[6],
     },
     edit: DOWNLOAD_GB['flux2-klein-4b'] + EDIT_SAVED_GB,
+    inpaint: INPAINT_GB,
+    background: BACKGROUND_GB,
   }
 }
 
 /** 選んだ組み合わせで、足りないものにだけ要る空き（GB） */
 export function requiredDiskGB(
-  missing: { generate: boolean; edit: boolean },
+  missing: { generate: boolean; edit: boolean; inpaint?: boolean; background?: boolean },
   options: SetupOptions,
 ): number {
   const table = requiredGBTable()
   return (
     (missing.generate ? table.generate[options.quantize] : 0) +
-    (missing.edit && options.editModel ? table.edit : 0)
+    (missing.edit && options.editModel ? table.edit : 0) +
+    (missing.inpaint !== false && options.inpaint ? table.inpaint : 0) +
+    (missing.background !== false && options.background ? table.background : 0)
   )
 }
 
@@ -182,8 +221,8 @@ export function findBrew(exists: (path: string) => boolean = existsSync): string
 /** 生成と保存の両方の実行ファイルが揃って初めて「入っている」 */
 export function hasMflux(exists: (path: string) => boolean, home: string): boolean {
   return (
-    exists(mfluxBinPath('mflux-generate-z-image-turbo', home)) &&
-    exists(mfluxBinPath('mflux-save', home))
+    exists(uvToolBinPath('mflux-generate-z-image-turbo', home)) &&
+    exists(uvToolBinPath('mflux-save', home))
   )
 }
 
@@ -249,6 +288,8 @@ export interface RunnerDeps {
   mkdir: (path: string) => Promise<void>
   remove: (path: string) => Promise<void>
   rename: (from: string, to: string) => Promise<void>
+  /** ファイルを 1 つ書く。LaMa の暖機に渡す小さな画像を置くのに使う */
+  writeFile: (path: string, bytes: Uint8Array) => Promise<void>
   /** ディレクトリ配下のファイルの合計バイト数。取得の進み具合を測るのに使う */
   dirSizeBytes: (path: string) => Promise<number>
   /** 進み具合を測る間隔。テストでは短くする */
@@ -335,6 +376,9 @@ export function defaultRunnerDeps(): RunnerDeps {
     },
     remove: (path) => rm(path, { recursive: true, force: true }),
     rename,
+    writeFile: async (path, bytes) => {
+      await writeFile(path, bytes)
+    },
     dirSizeBytes,
   }
 }
@@ -402,6 +446,43 @@ class CancelledError extends Error {
 
 const MAX_LOG_LINES = 400
 
+/** LaMa の重み。iopaint は torch hub のキャッシュへ置く */
+export function lamaWeightPath(home: string): string {
+  return join(home, '.cache', 'torch', 'hub', 'checkpoints', 'big-lama.pt')
+}
+
+/**
+ * rembg の重み。**置き場が版で変わった**ので両方見る
+ * （2.x は `~/.rembg/models/<名前>/<名前>.onnx`、古い版は `~/.u2net/<名前>.onnx`）。
+ */
+export function rembgWeightPath(
+  home: string,
+  exists: (path: string) => boolean,
+): string | null {
+  const candidates = [
+    join(home, '.rembg', 'models', BACKGROUND_MODEL, `${BACKGROUND_MODEL}.onnx`),
+    join(home, '.u2net', `${BACKGROUND_MODEL}.onnx`),
+  ]
+  return candidates.find((path) => exists(path)) ?? null
+}
+
+/**
+ * LaMa の暖機に渡す 32x32 の画像とマスク（中央の 8x8 だけ白）。
+ * 重みだけを落とす口が無いので、**一番小さい仕事をさせて取りに行かせる**。
+ */
+const WARMUP_IMAGE = Uint8Array.from(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nO3NQQkAAAgEsItuFOMYyxQ+hMH+S/WcikAgEAgEAoFAIPgSLKGVoGpzJe5eAAAAAElFTkSuQmCC',
+    'base64',
+  ),
+)
+const WARMUP_MASK = Uint8Array.from(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAI0lEQVR4nO3NMREAAAgEoO9fWhM4OnhCARKAI2ogEHwKAJY1xAm/QcdQMrgAAAAASUVORK5CYII=',
+    'base64',
+  ),
+)
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -437,7 +518,12 @@ export class SetupRunner {
       throw new Error('PROVISION_IMAGE_COMMAND で指定されているので、ここからは触らない')
     }
     const needed = requiredDiskGB(
-      { generate: !status.generateModel.found, edit: !status.editModel.found },
+      {
+        generate: !status.generateModel.found,
+        edit: !status.editModel.found,
+        inpaint: !status.inpaint.found,
+        background: !status.background.found,
+      },
       options,
     )
     if (status.diskFreeGB !== undefined && status.diskFreeGB < needed) {
@@ -538,7 +624,7 @@ export class SetupRunner {
         plan: async () => {
           const existing = findSavedModel(alreadyHave, deps.exists, home)
           if (existing) return { skip: `${normalizeHome(existing, home)} がある` }
-          const save = mfluxBinPath('mflux-save', home)
+          const save = uvToolBinPath('mflux-save', home)
           if (!deps.exists(save)) throw new Error('mflux-save が無い。先に mflux を入れる')
           // 前回の半端を消してから始める。mflux-save が上書きを拒むかに依らない
           await deps.remove(partial)
@@ -566,6 +652,30 @@ export class SetupRunner {
         doneDetail: normalizeHome(finalPath, home),
       }
     }
+    /** uv で Python の道具を 1 つ入れる段階。mflux と同じ形（版は固定する） */
+    const uvToolStep = (
+      id: StepId,
+      label: string,
+      command: string,
+      spec: string,
+      python: string,
+    ): StepPlan => ({
+      id,
+      label,
+      plan: async () => {
+        if (deps.exists(uvToolBinPath(command, home))) return { skip: '入っている' }
+        const found = findUv(deps.env, deps.exists, home)
+        if (!found) throw new Error(`uv が無いので ${command} を入れられない`)
+        const args = ['tool', 'install', '--python', python, spec]
+        return { bin: found.path, args, display: `uv ${args.join(' ')}` }
+      },
+      after: async () => {
+        if (!deps.exists(uvToolBinPath(command, home))) {
+          throw new Error(`uv は終わったが ~/.local/bin/${command} が無い`)
+        }
+      },
+    })
+
     const steps: StepPlan[] = [
       uv,
       mflux,
@@ -590,6 +700,92 @@ export class SetupRunner {
           [EDIT_MODEL_DIR],
         ),
       )
+    }
+    if (options.inpaint) {
+      steps.push(
+        uvToolStep(
+          'inpaint',
+          `範囲の消去 IOPaint ${PINNED.iopaint}（LaMa）`,
+          'iopaint',
+          `iopaint==${PINNED.iopaint}`,
+          PINNED.inpaintPython,
+        ),
+      )
+      steps.push({
+        id: 'inpaint-model',
+        label: 'LaMa の重み（約 0.2GB）',
+        /**
+         * **重みだけを落とす口が無い**（`iopaint download` は HuggingFace の SD 用）。
+         * 小さな画像を 1 枚だけ消させて取りに行かせる。**実行するコマンドは
+         * 本番と同じもの**（`suggestInpaintCommand`）なので、ここで通れば本番も通る
+         */
+        plan: async () => {
+          if (deps.exists(lamaWeightPath(home))) return { skip: '入っている' }
+          const template = suggestInpaintCommand(deps.exists, home)
+          if (!template) throw new Error('iopaint が無い。先に入れる')
+          const dir = join(home, '.cache', 'provision', '.warmup')
+          await deps.remove(dir)
+          await deps.mkdir(join(dir, 'out'))
+          const image = join(dir, 'image.png')
+          const mask = join(dir, 'mask.png')
+          await deps.writeFile(image, WARMUP_IMAGE)
+          await deps.writeFile(mask, WARMUP_MASK)
+          const args = template
+            .trim()
+            .split(/\s+/)
+            .map((arg) =>
+              arg
+                .replaceAll('{image}', image)
+                .replaceAll('{mask}', mask)
+                .replaceAll('{outputDir}', join(dir, 'out'))
+                .replaceAll('{out}', join(dir, 'out', 'image.png')),
+            )
+          const bin = args.shift()!
+          return { bin, args, display: `${bin.split('/').pop()} run --model lama（暖機）` }
+        },
+        after: async () => {
+          await deps.remove(join(home, '.cache', 'provision', '.warmup'))
+          if (!deps.exists(lamaWeightPath(home))) {
+            throw new Error('暖機は終わったが LaMa の重みが見つからない')
+          }
+        },
+        cleanup: () => deps.remove(join(home, '.cache', 'provision', '.warmup')),
+      })
+    }
+    if (options.background) {
+      steps.push(
+        uvToolStep(
+          'background',
+          `背景の透明化 rembg ${PINNED.rembg}（U²-Net）`,
+          'rembg',
+          `rembg[cpu,cli]==${PINNED.rembg}`,
+          PINNED.backgroundPython,
+        ),
+      )
+      steps.push({
+        id: 'background-model',
+        label: `${BACKGROUND_MODEL} の重み（約 0.18GB）`,
+        /**
+         * **モデルを名指しして落とす。** 名指ししないと rembg は版ごとの既定を
+         * 取りに行く（2.0.83 では 1.02GB の bria-rmbg）。実行時も名指しするので、
+         * ここで落としたものがそのまま使われる
+         */
+        plan: async () => {
+          if (rembgWeightPath(home, deps.exists) !== null) return { skip: '入っている' }
+          const bin = uvToolBinPath('rembg', home)
+          if (!deps.exists(bin)) throw new Error('rembg が無い。先に入れる')
+          return {
+            bin,
+            args: ['d', BACKGROUND_MODEL],
+            display: `rembg d ${BACKGROUND_MODEL}`,
+          }
+        },
+        after: async () => {
+          if (rembgWeightPath(home, deps.exists) === null) {
+            throw new Error(`取得は終わったが ${BACKGROUND_MODEL} の重みが見つからない`)
+          }
+        },
+      })
     }
     return steps
   }
@@ -751,14 +947,34 @@ export async function probeSetupStatus(
   const mfluxFound = hasMflux(deps.exists, deps.home)
   const generate = findSavedModel(MODEL_DIRS_BEST_FIRST, deps.exists, deps.home)
   const edit = findSavedModel([EDIT_MODEL_DIR], deps.exists, deps.home)
+  /** 任意の道具は、**実行ファイルと重みの両方**が揃って初めて「入っている」 */
+  const inpaintFound =
+    deps.exists(uvToolBinPath('iopaint', deps.home)) && deps.exists(lamaWeightPath(deps.home))
+  const backgroundFound =
+    deps.exists(uvToolBinPath('rembg', deps.home)) &&
+    rembgWeightPath(deps.home, deps.exists) !== null
 
   // 版と空き容量は互いに関係ないので同時に測る。版の組み立ては Agent と同じ関数に任せ、
   // 画面に出る文字列と来歴に載る文字列がずれないようにする
-  const [versions, diskFreeGB] = await Promise.all([
+  const [versions, inpaintVersions, backgroundVersions, diskFreeGB] = await Promise.all([
     mfluxFound
       ? probeToolEnvironment(
-          () => mfluxBinPath('mflux-generate-z-image-turbo', deps.home),
+          () => uvToolBinPath('mflux-generate-z-image-turbo', deps.home),
           ['mflux', 'mlx'],
+          undefined,
+        ).then((tool) => tool.version)
+      : Promise.resolve(undefined),
+    inpaintFound
+      ? probeToolEnvironment(
+          () => uvToolBinPath('iopaint', deps.home),
+          ['iopaint', 'torch'],
+          undefined,
+        ).then((tool) => tool.version)
+      : Promise.resolve(undefined),
+    backgroundFound
+      ? probeToolEnvironment(
+          () => uvToolBinPath('rembg', deps.home),
+          ['rembg', 'onnxruntime'],
           undefined,
         ).then((tool) => tool.version)
       : Promise.resolve(undefined),
@@ -793,6 +1009,14 @@ export async function probeSetupStatus(
     editModel: {
       found: edit !== null,
       ...(edit ? { path: normalizeHome(edit, deps.home) } : {}),
+    },
+    inpaint: {
+      found: inpaintFound,
+      ...(inpaintVersions ? { versions: inpaintVersions } : {}),
+    },
+    background: {
+      found: backgroundFound,
+      ...(backgroundVersions ? { versions: backgroundVersions } : {}),
     },
     memoryGB: Math.round(memory / 2 ** 30),
     recommendedQuantize: recommendedQuantize(memory),

@@ -3,7 +3,7 @@ import {
   DEFAULT_STEPS,
   ImageCommandMissingError,
   cacheKeyOf,
-  mfluxBinPath,
+  uvToolBinPath,
   modelIdOf,
   resolveImageCommand,
   resolveImageCommandForModel,
@@ -143,7 +143,7 @@ describe('置き場の取り決め（導入と同じ前提を共有する / D-02
   })
 
   it('実行ファイルは uv tool install の置き場（~/.local/bin）', () => {
-    expect(mfluxBinPath('mflux-save', '/Users/x')).toBe('/Users/x/.local/bin/mflux-save')
+    expect(uvToolBinPath('mflux-save', '/Users/x')).toBe('/Users/x/.local/bin/mflux-save')
   })
 
   it('生成器が無いエラーは印を持つ。画面は文言ではなく印で導入へ誘導する', () => {

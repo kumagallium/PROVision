@@ -142,6 +142,9 @@ export function SettingsDialog({
   /** null なら推奨に従う。利用者が選び直したときだけ値を持つ */
   const [quantizeChoice, setQuantizeChoice] = useState<4 | 6 | null>(null)
   const [wantEditModel, setWantEditModel] = useState(false)
+  /** 任意の道具（D-029 追記）。範囲の消去と背景の透明化は、要る人だけ入れる */
+  const [wantInpaint, setWantInpaint] = useState(false)
+  const [wantBackground, setWantBackground] = useState(false)
   const [setupStarting, setSetupStarting] = useState(false)
   const setupLogRef = useRef<HTMLPreElement | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
@@ -320,6 +323,8 @@ export function SettingsDialog({
         body: JSON.stringify({
           quantize: quantizeChoice ?? setup.recommendedQuantize,
           editModel: wantEditModel,
+          inpaint: wantInpaint,
+          background: wantBackground,
         }),
       })
       const value = (await response.json()) as { job?: SetupJob; error?: string }
@@ -570,9 +575,16 @@ export function SettingsDialog({
   /** 足りないものの分だけ数える。揃っているものは触らないので、その分の空きは要らない */
   const setupRequiredGB = setup
     ? (setup.generateModel.found ? 0 : setup.requiredGB.generate[chosenQuantize]) +
-      (wantEditModel && !setup.editModel.found ? setup.requiredGB.edit : 0)
+      (wantEditModel && !setup.editModel.found ? setup.requiredGB.edit : 0) +
+      (wantInpaint && !setup.inpaint.found ? setup.requiredGB.inpaint : 0) +
+      (wantBackground && !setup.background.found ? setup.requiredGB.background : 0)
     : 0
-  const setupComplete = Boolean(setup?.ready && (!wantEditModel || setup.editModel.found))
+  const setupComplete = Boolean(
+    setup?.ready &&
+      (!wantEditModel || setup.editModel.found) &&
+      (!wantInpaint || setup.inpaint.found) &&
+      (!wantBackground || setup.background.found),
+  )
   /** ここから触ってよい環境か。対象外の環境と、環境変数で自分で管理している人は除く */
   const setupEditable = Boolean(setup && setup.supported && !setup.managedByEnv)
   const canStartSetup = setupEditable && !setupComplete && !setupRunning
@@ -607,6 +619,20 @@ export function SettingsDialog({
           detail: setup.editModel.found
             ? (setup.editModel.path ?? '')
             : '無し。無くても生成用で編集できますが、文字が崩れやすくメモリも多く使います',
+        },
+        {
+          label: '範囲の消去（任意）',
+          ok: setup.inpaint.found,
+          detail: setup.inpaint.found
+            ? (setup.inpaint.versions ?? '入っています')
+            : `無し。「ここを消して」に要ります（IOPaint ${setup.pinned.iopaint} / LaMa）`,
+        },
+        {
+          label: '背景の透明化（任意）',
+          ok: setup.background.found,
+          detail: setup.background.found
+            ? (setup.background.versions ?? '入っています')
+            : `無し。「背景を透明にして」に要ります（rembg ${setup.pinned.rembg} / U²-Net）`,
         },
       ]
     : []
@@ -820,7 +846,8 @@ export function SettingsDialog({
               <label style={LABEL}>画像生成の環境</label>
               <p style={{ fontSize: 12, color: '#5c6b73', margin: '0 0 8px' }}>
                 生成はこの Mac の中で動く mflux と、量子化済みの z-image-turbo で行います。
-                足りないものだけをここから入れられます。入る先は <code>~/.local</code>
+                範囲の消去（LaMa）と背景の透明化（rembg）も、要るならここから入れられます。
+                足りないものだけを入れます。入る先は <code>~/.local</code>
                 （uv と mflux）と <code>~/.cache/provision</code>（モデル）。元モデルは Hugging
                 Face から落とし、<code>~/.cache/huggingface</code> に残ります。ログインは要りません。
               </p>
@@ -910,6 +937,32 @@ export function SettingsDialog({
                             disabled={setupRunning}
                           />
                           編集モデルも入れる（約 {setup.requiredGB.edit}GB）
+                        </label>
+                      ) : null}
+                      {!setup.inpaint.found ? (
+                        <label
+                          style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={wantInpaint}
+                            onChange={(e) => setWantInpaint(e.target.checked)}
+                            disabled={setupRunning}
+                          />
+                          範囲の消去も入れる（約 {setup.requiredGB.inpaint}GB）
+                        </label>
+                      ) : null}
+                      {!setup.background.found ? (
+                        <label
+                          style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={wantBackground}
+                            onChange={(e) => setWantBackground(e.target.checked)}
+                            disabled={setupRunning}
+                          />
+                          背景の透明化も入れる（約 {setup.requiredGB.background}GB）
                         </label>
                       ) : null}
                     </div>
