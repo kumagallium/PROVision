@@ -12,9 +12,11 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ProvGraph, UnchangedImageError } from '../prov/graph.js'
 import {
+  imageToolDefinition,
   imageToolExecutor,
   imageToolPixelOrigin,
   imageToolReproducibility,
+  isImageToolName,
 } from '../ai/tools.js'
 import { loadGraph, saveGraph } from '../prov/store.js'
 import { migrateConfigFiles } from './config-dir.js'
@@ -62,6 +64,7 @@ import {
   SynthesisForbiddenError,
   asksForMultipleCandidates,
   editScopeOf,
+  needsTranslation,
   planImageOperation,
   proposeVariantPrompts,
   type ImageToolName,
@@ -828,6 +831,193 @@ app.post('/api/rerun', async (c) => {
     return c.json({ ...result, graph: toProvJsonLd(graph) })
   } catch (error) {
     // 設定と指示の組み合わせの問題であって、サーバの故障ではない
+    if (error instanceof SynthesisForbiddenError) return c.json({ error: error.message }, 400)
+    if (error instanceof ImageCommandMissingError) {
+      return c.json({ error: error.message, code: error.code }, 503)
+    }
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+  }
+})
+
+/**
+ * 手で書ける清書の長さ。**清書の上限（900 字）より広く取る**——あちらは書き直しに
+ * 効く長さの目安で、自分で書く人を縛る理由にはならない。ここは暴走を止めるだけの数字である。
+ */
+const MAX_AUTHOR_PROMPT_LENGTH = 2000
+
+/**
+ * 清書だけを直して、同じ手・同じ入力でもう一度出す（D-031）。
+ *
+ * **プランナーを通さない。** 通すと、手で書いた文が書き直されて「自分で書いた」が
+ * 嘘になる。手（ツール）と入力（親画像・実際に渡した 1 枚）は記録から引くので、
+ * 変わるのは清書と seed だけになる——**言い回しの差だけを見られる**のが肝である。
+ *
+ * **`/api/rerun` とは別の口にする。** あちらは記録どおりに出し直して食い違いを検査する
+ * ものなので（D-011）、清書を変えたものを通すと、こちらが変えた差を「食い違い」として
+ * 記録してしまう。
+ */
+app.post('/api/regenerate', async (c) => {
+  const body = (await c.req.json()) as { entity?: string; prompt?: string; seed?: number }
+  const target = String(body.entity ?? '')
+  const original = graph.activityThatGenerated(target)
+  const originalEntity = graph.getEntity(target)
+  if (!original || !originalEntity) return c.json({ error: `その版がグラフに無い: ${target}` }, 400)
+
+  const prompt = String(body.prompt ?? '').trim()
+  if (!prompt) return c.json({ error: '清書が空です' }, 400)
+  if (prompt.length > MAX_AUTHOR_PROMPT_LENGTH) {
+    return c.json({ error: `清書は ${MAX_AUTHOR_PROMPT_LENGTH} 字までです` }, 400)
+  }
+
+  const tool = original.selectedTool
+  if (!isImageToolName(tool) || !imageToolDefinition(tool).usesPrompt) {
+    return c.json(
+      { error: 'この版は清書を画像モデルへ渡していないので、清書を直しても絵は変わりません' },
+      400,
+    )
+  }
+
+  try {
+    const entity = await serial(async () => {
+      // 出し直しも新しい版を生む＝画素を作る手が 1 本増える（D-020）
+      if ((await readPolicy()).forbidSynthesis && imageToolPixelOrigin(tool) === 'synthesized') {
+        throw new SynthesisForbiddenError(
+          'この版は画素を作る操作で作られています。いまの設定では出し直せません',
+        )
+      }
+      const parentSource = original.used.length > 0 ? sourceImageOf(original.used[0]!) : undefined
+      /**
+       * **実際にモデルへ渡った 1 枚**を引く。編集範囲を消した画像も、融合で横に並べた
+       * 1 枚も、ここに畳まれている（D-002）。記録が無いなら親そのものが渡っている
+       */
+      const conditioning = original.conditioningImageLocation
+        ? imageFileOf(original.conditioningImageLocation, original.conditioningImageDigest ?? '')
+        : parentSource
+      // seed は既定で据え置く。変えると、絵が変わった理由が清書か seed か分からなくなる
+      const seed = Number.isInteger(body.seed) ? Number(body.seed) : original.seed
+      const imageStrength = conditioning
+        ? (original.imageStrength ?? IMAGE_EDIT_STRENGTH)
+        : undefined
+
+      const size = {
+        ...(original.width !== undefined ? { width: original.width } : {}),
+        ...(original.height !== undefined ? { height: original.height } : {}),
+        ...(original.steps !== undefined ? { steps: original.steps } : {}),
+      }
+      const input = {
+        prompt,
+        seed,
+        ...size,
+        ...(conditioning ? { imageDigest: conditioning.digest } : {}),
+        ...(imageStrength !== undefined ? { imageStrength } : {}),
+      }
+      // 鍵は記録されたモデルで作る。足元の既定ではない（走らせるのも記録されたモデル）
+      const key = cacheKeyOf(input, original.model)
+      const cachedPng = join(CACHE_DIR, `${key}.png`)
+      const cachedMeta = join(CACHE_DIR, `${key}.json`)
+
+      let result: GenerateResult
+      if (existsSync(cachedPng) && existsSync(cachedMeta)) {
+        const meta = JSON.parse(await readFile(cachedMeta, 'utf8'))
+        result = { ...meta, png: new Uint8Array(await readFile(cachedPng)) }
+      } else {
+        result = await generateImage({
+          ...input,
+          // 記録されたモデルで走らせる。既定を差し替えても過去の版と比べられる（D-002）
+          model: original.model,
+          ...(conditioning ? { imagePath: conditioning.path } : {}),
+        })
+        await writeFile(cachedPng, result.png)
+        await writeFile(
+          cachedMeta,
+          JSON.stringify(
+            {
+              model: result.model,
+              provider: result.provider,
+              startedAtTime: result.startedAtTime,
+              endedAtTime: result.endedAtTime,
+            },
+            null,
+            2,
+          ),
+          'utf8',
+        )
+      }
+
+      const digest = imageContentDigest(result.png)
+      await writeFile(join(IMAGE_DIR, `${digest.slice(0, 16)}.png`), result.png)
+      const dimensions = pngDimensions(result.png)
+
+      const recorded = graph.recordGeneration({
+        image: { digest },
+        label: originalEntity.label,
+        location: `images/${digest.slice(0, 16)}.png`,
+        prompt,
+        model: result.model,
+        provider: result.provider,
+        seed,
+        ...(original.steps !== undefined ? { steps: original.steps } : {}),
+        ...(dimensions ?? {}),
+        ...(imageStrength !== undefined ? { imageStrength } : {}),
+        // 条件画像は記録されていたときだけ引き継ぐ。親そのものなら used が指している
+        ...(original.conditioningImageDigest && original.conditioningImageLocation
+          ? {
+              conditioningImageDigest: original.conditioningImageDigest,
+              conditioningImageLocation: original.conditioningImageLocation,
+            }
+          : {}),
+        ...(original.maskImageDigest && original.maskImageLocation
+          ? {
+              maskImageDigest: original.maskImageDigest,
+              maskImageLocation: original.maskImageLocation,
+            }
+          : {}),
+        // 頼んだことは変わっていない。変えたのは、それをどう渡したかである
+        ...(original.intent ? { intent: original.intent } : {}),
+        selectedTool: tool,
+        reproducibility: imageToolReproducibility(tool),
+        pixelOrigin: imageToolPixelOrigin(tool),
+        // 清書を書いたのは利用者。プランナーは通っていないので llm とは書けない（D-031）
+        planningMode: 'author',
+        ...(original.toolArguments ? { toolArguments: original.toolArguments } : {}),
+        ...(commandTemplateOf(tool, conditioning !== undefined, RESOLVERS)
+          ? { commandTemplate: commandTemplateOf(tool, conditioning !== undefined, RESOLVERS)! }
+          : {}),
+        // **同じ親から生えた兄弟**。出し直しは元の版の子ではない
+        ...(original.used.length > 0 ? { derivedFrom: original.used } : {}),
+        ...(original.branchedFrom ? { branchedFrom: original.branchedFrom } : {}),
+        ...(original.referenced.length > 0 ? { referenced: original.referenced } : {}),
+        // 同じ指示に応えた版なので、同じ送信の下へ並べる（D-022）
+        ...(original.planId ? { planId: original.planId } : {}),
+        startedAtTime: result.startedAtTime,
+        endedAtTime: result.endedAtTime,
+        agents: [executorAgent(tool).id, (await personAgent()).id],
+      })
+      await persist()
+      return recorded
+    })
+
+    return c.json({
+      entity,
+      graph: toProvJsonLd(graph),
+      // 日本語のままだと画像モデルはほとんど汲めない（D-026）。止めはしないが黙らない
+      ...(needsTranslation(prompt)
+        ? {
+            warning:
+              '清書に日本語が残っています。画像モデルは日本語をほとんど汲めないので、英語で書くほうが効きます',
+          }
+        : {}),
+    })
+  } catch (error) {
+    if (error instanceof UnchangedImageError) {
+      return c.json(
+        {
+          error:
+            'この清書では画像が変わりませんでした。同じ絵は同じ版として扱うため、新しい版は作られていません',
+        },
+        400,
+      )
+    }
     if (error instanceof SynthesisForbiddenError) return c.json({ error: error.message }, 400)
     if (error instanceof ImageCommandMissingError) {
       return c.json({ error: error.message, code: error.code }, 503)

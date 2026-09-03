@@ -182,7 +182,17 @@ you to change.`。絶対形（`Preserve all existing visual elements...`）は�
 **決めた側（AI か規則か）を画面に出す**。
 
 実行された全文は`provision:prompt`、利用者の生の言葉は`provision:intent`として
-別々に来歴へ残るので、何を頼んで何が実行されたかは常に突き合わせられる。APIキーは`PROVISION_USE_KEYCHAIN=1`のときKeychainへ保存し、
+別々に来歴へ残るので、何を頼んで何が実行されたかは常に突き合わせられる。
+
+清書が狙いを外したときは、版ごとの「清書を直して出し直す」から**自分で書き直せる**（D-031）。
+書いた文は書き直されずそのまま渡り、手と入力画像はその版の記録から引き継ぐ。seed は既定で
+据え置くので、**言い回しの差だけ**を見られる。その一手は`planningMode: author`として残る。
+
+**部分だけを描かせたいときは、全体の名前を主語にしない。** 「タコの足 1 本」を
+`a single octopus tentacle ... no other limbs`と書くと、3 通りの seed すべてでタコ丸ごとが出た。
+主語から`octopus`を外して足を描写し、`no octopus, no head, no body`と書くと 3/3 で足 1 本になった。
+清書の規則にこれを入れてある（D-026 の追記）。z-image-turboでは`--negative-prompt`と
+`--guidance`は**画素まで同一**で効かないので、打ち消しは清書の中に書く。APIキーは`PROVISION_USE_KEYCHAIN=1`のときKeychainへ保存し、
 来歴や設定JSONへは書かない。macOSデスクトップ版は常にこの経路を通る。開発サーバーで
 同じ扱いにするなら`PROVISION_USE_KEYCHAIN=1 pnpm dev`で起動する。指定しない場合は
 平文保存せずメモリだけに保持するため、サーバーを止めると再入力が必要。どちらの状態かは
