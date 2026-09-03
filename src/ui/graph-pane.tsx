@@ -66,12 +66,20 @@ export function GraphPane({
   current,
   fresh,
   onSelect,
+  showArchived,
+  archivedCount,
+  onToggleArchived,
 }: {
   flow: { nodes: FlowNode[]; edges: FlowEdge[] } | null
   current: string | null
   /** 直近の送信で生まれた版（D-028）。印を付けるだけで、位置には触らない */
   fresh: ReadonlySet<string>
   onSelect: (id: string | null) => void
+  /** アーカイブした版も出しているか（D-032） */
+  showArchived?: boolean
+  /** この会話でアーカイブしてある版の数。0 なら切り替えを出さない */
+  archivedCount?: number
+  onToggleArchived?: () => void
 }) {
   // 制御モードでは onNodesChange を渡す。渡さないと選択もドラッグも効かない
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -245,8 +253,37 @@ export function GraphPane({
   return (
     <div
       ref={wrapper}
-      style={{ minWidth: 0, borderLeft: '1px solid #e0e5e8', height: '100%' }}
+      style={{
+        minWidth: 0,
+        borderLeft: '1px solid #e0e5e8',
+        height: '100%',
+        position: 'relative',
+      }}
     >
+      {archivedCount !== undefined && archivedCount > 0 && onToggleArchived ? (
+        // アーカイブした版はグラフから外れている（D-032）。**在ることは言う**——
+        // 黙って消すと、作ったはずの版が失われたように見える
+        <button
+          type="button"
+          onClick={onToggleArchived}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 12,
+            zIndex: 4,
+            border: '1px solid #d8dfe3',
+            borderRadius: 7,
+            background: '#fff',
+            padding: '5px 10px',
+            fontSize: 11.5,
+            color: '#5c6b73',
+            cursor: 'pointer',
+            boxShadow: '0 1px 3px rgba(0,0,0,.12)',
+          }}
+        >
+          {showArchived ? 'アーカイブを隠す' : `アーカイブ ${archivedCount} 件を表示`}
+        </button>
+      ) : null}
       <ReactFlow
         nodes={nodes}
         edges={edges}

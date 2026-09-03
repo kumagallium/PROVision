@@ -25,6 +25,11 @@ export function App() {
    * 確認に失敗したら黙る——導入できない環境でまで騒がない
    */
   const [setupNeeded, setSetupNeeded] = useState(false)
+  /**
+   * アーカイブした版も出すか（D-032）。**グラフとチャットで 1 つの切り替え**にする——
+   * 別々に持つと、片方で出しているのにもう片方では消えている状態が作れてしまう
+   */
+  const [showArchived, setShowArchived] = useState(false)
   /** 起動時に自動で確認した結果。見つかったら設定ボタンに印を出す */
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   /**
@@ -112,7 +117,18 @@ export function App() {
    */
   const flow = useMemo(
     () =>
-      graph && currentRoot ? toFlow(graph, currentRoot) : { nodes: [], edges: [] },
+      graph && currentRoot
+        ? toFlow(graph, currentRoot, { hideArchived: !showArchived })
+        : { nodes: [], edges: [] },
+    [graph, currentRoot, showArchived],
+  )
+
+  /** この会話でアーカイブしてある版の数。0 なら切り替えを出さない */
+  const archivedCount = useMemo(
+    () =>
+      graph && currentRoot
+        ? graph.session(currentRoot).filter((entity) => graph.isArchived(entity.id)).length
+        : 0,
     [graph, currentRoot],
   )
 
@@ -161,7 +177,15 @@ export function App() {
 
       <ReactFlowProvider>
         {currentRoot ? (
-          <GraphPane flow={flow} current={current} fresh={fresh} onSelect={setCurrent} />
+          <GraphPane
+            flow={flow}
+            current={current}
+            fresh={fresh}
+            onSelect={setCurrent}
+            showArchived={showArchived}
+            archivedCount={archivedCount}
+            onToggleArchived={() => setShowArchived(!showArchived)}
+          />
         ) : (
           <div
             style={{
@@ -233,6 +257,8 @@ export function App() {
         bornBefore={bornBefore}
         onBornBefore={setBornBefore}
         onOpenSetup={() => setSettingsOpen('image')}
+        showArchived={showArchived}
+        onToggleArchived={() => setShowArchived(!showArchived)}
       />
 
       {settingsOpen ? (

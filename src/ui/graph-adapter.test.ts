@@ -147,16 +147,61 @@ describe('React Flow への写し取り', () => {
     expect(nodes.filter((n) => n.type === 'activity').every((n) => n.data.planned === false)).toBe(true)
   })
 
-  it('よけた版はグラフから消さず、印を付けるだけ（D-032）', () => {
+  it('アーカイブした版は、既定では印が付くだけ。隠すのは見る側が決める（D-032）', () => {
     const g = branchingGraph()
     const v3b = g.listEntities().find((e) => e.label === 'v3b')!
     g.assertArchived({ entity: v3b.id, archived: true, at: '2026-09-03T11:00:00Z' })
 
     const { nodes } = toFlow(g)
     expect(nodes.find((n) => n.id === v3b.id)!.data.archived).toBe(true)
-    // 系譜の途中なら派生元でもある。消すと子が「どこから来たか」を辿れなくなる
     expect(nodes.filter((n) => n.type === 'image')).toHaveLength(4)
     expect(nodes.filter((n) => n.data.archived === true)).toHaveLength(1)
+  })
+
+  it('隠すよう頼まれたら、その版と生成の節点をグラフから外す（D-032）', () => {
+    const g = branchingGraph()
+    const v3b = g.listEntities().find((e) => e.label === 'v3b')!
+    g.assertArchived({ entity: v3b.id, archived: true, at: '2026-09-03T11:00:00Z' })
+
+    const { nodes, edges } = toFlow(g, undefined, { hideArchived: true })
+    expect(nodes.some((n) => n.id === v3b.id)).toBe(false)
+    // 生んだ生成の節点も一緒に消える。残すと、どこへも繋がらない札になる
+    expect(nodes.filter((n) => n.type === 'image')).toHaveLength(3)
+    expect(nodes.filter((n) => n.type === 'activity')).toHaveLength(3)
+    expect(edges.every((e) => !e.id.includes(v3b.id))).toBe(true)
+  })
+
+  it('隠した版の子は、その上の見えている版へ繋ぎ直す（D-032）', () => {
+    const g = branchingGraph()
+    const v2 = g.listEntities().find((e) => e.label === 'v2')!
+    const v1 = g.listEntities().find((e) => e.label === 'v1')!
+    const v3a = g.listEntities().find((e) => e.label === 'v3a')!
+    // 系譜の途中の版を隠す。子（v3a・v3b）は残る
+    g.assertArchived({ entity: v2.id, archived: true, at: '2026-09-03T11:00:00Z' })
+
+    const { nodes, edges } = toFlow(g, undefined, { hideArchived: true })
+    const ids = new Set(nodes.map((n) => n.id))
+    expect(ids.has(v2.id)).toBe(false)
+    expect(ids.has(v3a.id)).toBe(true)
+    // 辺ごと落とすと、子が「どこから来たか」を辿れなくなる。v1 へ繋ぎ直す
+    const relinked = edges.filter((e) => e.data.kind === 'skipped')
+    expect(relinked).toHaveLength(2)
+    expect(relinked.every((e) => e.source === v1.id)).toBe(true)
+    // 端点の無い辺は作らない（ELK が例外を投げてグラフが 1 本も描かれなくなる）
+    expect(edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true)
+  })
+
+  it('根まで全部隠れているなら、子はそのまま根として描く（繋ぎ先が無い）', () => {
+    const g = branchingGraph()
+    const v1 = g.listEntities().find((e) => e.label === 'v1')!
+    const v2 = g.listEntities().find((e) => e.label === 'v2')!
+    for (const entity of [v1, v2]) {
+      g.assertArchived({ entity: entity.id, archived: true, at: '2026-09-03T11:00:00Z' })
+    }
+    const { nodes, edges } = toFlow(g, undefined, { hideArchived: true })
+    const ids = new Set(nodes.map((n) => n.id))
+    expect(edges.filter((e) => e.data.kind === 'skipped')).toHaveLength(0)
+    expect(edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true)
   })
 
   it('画像の置き場所を配信 URL に直す', () => {

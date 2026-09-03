@@ -541,7 +541,7 @@ export class ProvGraph {
   }
 
   /**
-   * その版をよけておく／戻す（D-032）。**記録は書き換えない。**
+   * その版をアーカイブへ入れる／戻す（D-032）。**記録は書き換えない。**
    * 表明を 1 本足すだけで、同じ版への最後の表明が効く（表示名と同じ形）。
    * 戻すのも「戻した」という表明なので、**よけた事実も残る。**
    */
@@ -561,7 +561,7 @@ export class ProvGraph {
     const assertion: AssertionActivity = {
       id,
       kind: 'archive',
-      label: input.archived ? 'よけておく' : 'よけたのを戻す',
+      label: input.archived ? 'アーカイブに入れる' : 'アーカイブから戻す',
       about: input.entity,
       referenced: [],
       archived: input.archived,
@@ -572,7 +572,7 @@ export class ProvGraph {
     return assertion
   }
 
-  /** その版をよけてあるか。同じ版への最後の表明が効く */
+  /** その版をアーカイブしてあるか。同じ版への最後の表明が効く */
   isArchived(entity: Iri): boolean {
     const latest = this.listAssertions()
       .filter((a) => a.kind === 'archive' && a.about === entity)

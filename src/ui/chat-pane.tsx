@@ -56,6 +56,9 @@ interface Props {
   onProgress?: (progress: { done: number; total: number } | null) => void
   /** 生成器が無かったとき、設定の「画像生成」を開いてもらう（D-029） */
   onOpenSetup?: () => void
+  /** アーカイブした版も出すか（D-032）。グラフと同じ切り替えを使う */
+  showArchived?: boolean
+  onToggleArchived?: () => void
 }
 
 export function ChatPane({
@@ -67,6 +70,8 @@ export function ChatPane({
   bornBefore,
   onBornBefore,
   onOpenSetup,
+  showArchived,
+  onToggleArchived,
 }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -74,8 +79,6 @@ export function ChatPane({
   /** エラーに付いてきた印。文言ではなく、これで導入へ誘導する（D-029） */
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [routingNotice, setRoutingNotice] = useState<string | null>(null)
-  /** よけた版も出すか（D-032）。会話を開き直せば既定（隠す）に戻る */
-  const [showArchived, setShowArchived] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
   /** 1 回の送信で出す候補の数（D-018）。**指示から数は読み取らない** */
@@ -108,7 +111,7 @@ export function ChatPane({
     onProgress?.(busy ? { done: born.length, total: variants } : null)
   }, [busy, born.length, variants, onProgress])
 
-  /** よけた版を出し入れする。**記録は書き換わらない**——表明が 1 本増える（D-032） */
+  /** アーカイブに入れる／戻す。**記録は書き換わらない**——表明が 1 本増える（D-032） */
   async function toggleArchive() {
     if (!current || archiving) return
     setArchiving(true)
@@ -121,7 +124,7 @@ export function ChatPane({
       })
       const body = (await response.json()) as { graph?: ProvJsonLdDocument; error?: string }
       if (!response.ok || body.error || !body.graph) {
-        throw new Error(body.error ?? `よけられませんでした（${response.status}）`)
+        throw new Error(body.error ?? `アーカイブできませんでした（${response.status}）`)
       }
       onGraph(body.graph)
     } catch (e: unknown) {
@@ -280,7 +283,7 @@ export function ChatPane({
               : []
           const shown = siblings.length > 1 ? siblings : entity ? [entity] : []
           /**
-           * よけた版（D-032）は候補の並びから外す。**いま見ている版だけは外さない**——
+           * アーカイブした版（D-032）は候補の並びから外す。**いま見ている版だけは外さない**——
            * 選んでいるものが消えると、自分がどこに居るのか分からなくなる
            */
           const archivedHere = shown.filter(
@@ -396,7 +399,7 @@ export function ChatPane({
               {archivedHere.length > 0 ? (
                 <button
                   type="button"
-                  onClick={() => setShowArchived(!showArchived)}
+                  onClick={() => onToggleArchived?.()}
                   style={{
                     border: 'none',
                     background: 'none',
@@ -408,8 +411,8 @@ export function ChatPane({
                   }}
                 >
                   {showArchived
-                    ? `よけた版 ${archivedHere.length} 件も出しています（隠す）`
-                    : `よけた版 ${archivedHere.length} 件を表示`}
+                    ? `アーカイブ ${archivedHere.length} 件も出しています（隠す）`
+                    : `アーカイブ ${archivedHere.length} 件を表示`}
                 </button>
               ) : null}
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
@@ -425,18 +428,18 @@ export function ChatPane({
         {current && chain.length > 0 ? (
           <>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
-              {/* 気に入らない版は消さずによけておく（D-032）。表明が 1 本増えるだけで戻せる */}
+              {/* 気に入らない版は消さずにアーカイブへ（D-032）。表明が 1 本増えるだけで戻せる */}
               <button
                 type="button"
                 onClick={() => void toggleArchive()}
                 disabled={busy || archiving}
                 style={SMALL_BUTTON}
               >
-                {graph?.isArchived(current) ? 'よけたのを戻す' : 'この版をよけておく'}
+                {graph?.isArchived(current) ? 'アーカイブから戻す' : 'この版をアーカイブ'}
               </button>
               {graph?.isArchived(current) ? (
                 <span style={{ fontSize: 11, color: '#8b98a1' }}>
-                  よけてあります。候補の並びから外れ、グラフでは薄く出ます
+                  アーカイブしてあります。候補の並びとグラフから外れます
                 </span>
               ) : null}
             </div>
