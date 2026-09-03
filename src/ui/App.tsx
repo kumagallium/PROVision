@@ -257,6 +257,7 @@ export function App() {
         bornBefore={bornBefore}
         onBornBefore={setBornBefore}
         onOpenSetup={() => setSettingsOpen('image')}
+        onOpenAiSettings={() => setSettingsOpen('ai')}
         showArchived={showArchived}
         onToggleArchived={() => setShowArchived(!showArchived)}
       />

@@ -34,6 +34,7 @@ import {
 } from '../image/mflux.js'
 import { probePlatform } from '../image/environment.js'
 import { ToolMissingError } from '../image/tool-missing.js'
+import { PromptNotTranslatedError } from '../image/untranslated.js'
 import { addSoftwareAgent, commandTemplateOf, probeToolEnvironment } from './agents.js'
 import {
   SetupRunner,
@@ -1302,6 +1303,20 @@ app.post('/api/generate', async (c) => {
       plan.tool === 'image.compose'
 
     /**
+     * **編集に日本語のまま渡さない**（D-033）。清書も訳もできなかったときで、
+     * かつ利用者が自分で清書を書いたわけでもないときに止める。
+     * 生成は止めない——多言語の生成モデルは日本語でも主題どおりに描く（実測）。
+     */
+    if (
+      usesImageModel &&
+      conditioningImage !== undefined &&
+      !body.prompt?.trim() &&
+      needsTranslation(basePrompt, plan.arguments.text)
+    ) {
+      throw new PromptNotTranslatedError()
+    }
+
+    /**
      * 候補の数（D-018）。**画像モデルを使う手だけ**に効く。確定的なツールで枚数を
      * 増やしても同じ画素が出るだけで、同じ Entity に畳まれる（D-001）
      */
@@ -1544,6 +1559,10 @@ app.post('/api/generate', async (c) => {
     // これも利用者側の話で、サーバの故障ではない
     if (error instanceof SynthesisForbiddenError) {
       return c.json({ error: error.message }, 400)
+    }
+    // 日本語のまま編集へ渡そうとした（D-033）。設定不足であって故障ではない
+    if (error instanceof PromptNotTranslatedError) {
+      return c.json({ error: error.message, code: error.code }, 400)
     }
     const why = error instanceof Error ? error.message : String(error)
     // 生成器が無いのは設定不足。画面はこの印を見て導入へ誘導する（D-029）

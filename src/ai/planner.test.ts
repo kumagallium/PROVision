@@ -744,3 +744,16 @@ describe('編集の範囲を書き直し文からも当てる（D-023）', () =>
     expect(editScopeOf(plan, 'もう少し余白を取って').scope).toBe('local')
   })
 })
+
+describe('日本語のまま渡さない（D-033）', () => {
+  it('編集用に組み立てた全文の中に日本語が残っていても見つける', () => {
+    // 実際に踏んだ形。英語の枠に日本語が挟まっていても、画像モデルには届かない
+    expect(
+      needsTranslation(
+        'Edit the input image according to this instruction: 痩せたクマにしてください Do not change anything the instruction does not ask you to change.',
+      ),
+    ).toBe(true)
+    // 描く文字列そのものは訳さない。日本語のワードマークは日本語で残る
+    expect(needsTranslation('Add the wordmark 熊研究所 below the logo', '熊研究所')).toBe(false)
+  })
+})

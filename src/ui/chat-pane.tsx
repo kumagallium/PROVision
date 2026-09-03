@@ -56,6 +56,8 @@ interface Props {
   onProgress?: (progress: { done: number; total: number } | null) => void
   /** 生成器が無かったとき、設定の「画像生成」を開いてもらう（D-029） */
   onOpenSetup?: () => void
+  /** 日本語のまま編集へ渡そうとしたとき、設定の「AI」を開いてもらう（D-033） */
+  onOpenAiSettings?: () => void
   /** アーカイブした版も出すか（D-032）。グラフと同じ切り替えを使う */
   showArchived?: boolean
   onToggleArchived?: () => void
@@ -70,6 +72,7 @@ export function ChatPane({
   bornBefore,
   onBornBefore,
   onOpenSetup,
+  onOpenAiSettings,
   showArchived,
   onToggleArchived,
 }: Props) {
@@ -500,6 +503,15 @@ export function ChatPane({
                 style={{ display: 'block', marginTop: 6, padding: '5px 10px', fontSize: 12 }}
               >
                 設定の「画像生成」から入れる
+              </button>
+            ) : null}
+            {errorCode === 'prompt-not-translated' && onOpenAiSettings ? (
+              <button
+                type="button"
+                onClick={onOpenAiSettings}
+                style={{ display: 'block', marginTop: 6, padding: '5px 10px', fontSize: 12 }}
+              >
+                設定の「AI」を開く
               </button>
             ) : null}
           </div>
