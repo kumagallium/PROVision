@@ -1,11 +1,11 @@
 {
-  "version": "0.2.23",
+  "version": "0.2.24",
   "notes": "変更点は CHANGELOG を参照",
-  "pub_date": "2026-09-03T01:17:56Z",
+  "pub_date": "2026-09-03T05:31:35Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRYTdZUGQxVEEyMjJYMnJyTUxLVElmNC9WeEt2cXJDRzlOVXA1cDRxTXdXUVFvdTN5MmIyemYxbHJqc1NucC9pWUVZTmVzN0JoUm04MDV0NXgvVkNXQ1dtNzVvc2hiMXdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4Mzk4MTkyCWZpbGU6UFJPVmlzaW9uLmFwcC50YXIuZ3oKbEtpU01wMldRUmFwN0pJSncwcGk3QW96UVErSVFINUtydEJLOC91eld6YUhPNHVCY0NHMW1TRDZGZCtkd0plcmMveU93dlR6amphcDhCcVlsZUEzQmc9PQo=",
-      "url": "https://github.com/kumagallium/PROVision/releases/download/v0.2.23/PROVision_0.2.23_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRYTdZUGQxVEEyMnlHQ1F6V1JzcVBwZUR1TGNmV1RCQmF6WGtOWHdqV0lRUXY0K3NDR2tIbjVobGtxT3Fhdlo5SUIyUEl5alI1Z08yb1FENUtJMVVtaUFyNVMxbFl2amc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDEzNDExCWZpbGU6UFJPVmlzaW9uLmFwcC50YXIuZ3oKNHJTOGpQTkh0aS9XUmxPakJQc2tJSklETkkrMlpPTjRyRjVRWVdVOFFLa3dBQ0N0UGZQMDZ0MjBjSlA1K2IxM3BDeWRJL1hKcXRrV0hzVGN0R213QUE9PQo=",
+      "url": "https://github.com/kumagallium/PROVision/releases/download/v0.2.24/PROVision_0.2.24_aarch64.app.tar.gz"
     }
   }
 }
