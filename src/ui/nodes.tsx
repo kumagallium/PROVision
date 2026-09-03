@@ -70,15 +70,13 @@ export function ImageNode({ data, selected }: NodeProps) {
         width: 168,
         // 別の会話から借りた版（D-021）。この会話には属さないので、実線で描かない
         ...(d.borrowed ? { borderStyle: 'dashed', opacity: 0.75 } : {}),
-        /**
-         * よけた版（D-032）は**薄くするだけで消さない**。系譜の途中なら派生元でもあり、
-         * 消すと子の版が「どこから来たか」を辿れなくなる
-         */
-        ...(d.archived ? { opacity: 0.35 } : {}),
+        // アーカイブした版（D-032）。ふだんはグラフから外れており、
+        // 「アーカイブを表示」にしたときだけ、この薄い姿で出る
+        ...(d.archived ? { opacity: 0.45 } : {}),
       }}
       title={
         d.archived
-          ? `${d.label}（よけてある）`
+          ? `${d.label}（アーカイブしてある）`
           : d.borrowed
             ? `${d.label}（別の会話から材料として使った）`
             : d.label
@@ -86,7 +84,9 @@ export function ImageNode({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Top} />
       {d.fresh ? <div style={FRESH_BADGE}>新</div> : null}
-      {d.archived ? <div style={{ ...FRESH_BADGE, background: '#8b98a1' }}>よけた</div> : null}
+      {d.archived ? (
+        <div style={{ ...FRESH_BADGE, background: '#8b98a1' }}>アーカイブ</div>
+      ) : null}
       {d.borrowed ? (
         <div style={{ padding: '4px 8px 0', fontSize: 10, color: c.text }}>別の会話から</div>
       ) : null}

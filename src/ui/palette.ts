@@ -21,4 +21,6 @@ export const EDGE_STYLE = {
   planned: { stroke: '#8a7bb8', dash: '4 3' },
   /** 同じ指定で出し直したら別の絵になった（prov:alternateOf）。派生ではない */
   alternate: { stroke: '#a8513f', dash: '2 4' },
+  /** 間にアーカイブした版がある（D-032）。直接の派生ではないので細い点線にする */
+  skipped: { stroke: '#b9c3c9', dash: '3 4' },
 } as const

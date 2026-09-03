@@ -30,7 +30,7 @@ export interface FlowNodeData {
   planned?: boolean
   /** 別の会話から材料として借りてきた版か（D-021） */
   borrowed?: boolean
-  /** 利用者がよけた版か（D-032）。**グラフからは消さない**——系譜の途中なら派生元でもある */
+  /** 利用者がアーカイブした版か（D-032） */
   archived?: boolean
   /**
    * 直近の送信で生まれた版か（D-028）。**写しの段階では決めない**——
@@ -52,7 +52,7 @@ export interface FlowEdge {
   source: string
   target: string
   /** 生成の辺か、人間が参照した辺か。見た目を変える */
-  data: { kind: 'used' | 'referenced' | 'generated' | 'alternate' | 'planned' }
+  data: { kind: 'used' | 'referenced' | 'generated' | 'alternate' | 'planned' | 'skipped' }
 }
 
 /** その道具が清書（画像モデルへ渡す全文）を使うか。知らない名前なら判断しない */
@@ -103,6 +103,7 @@ export function imageUrlOf(entity: ImageEntity): string | undefined {
 export function toFlow(
   graph: ProvGraph,
   root?: string,
+  options: { hideArchived?: boolean } = {},
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const nodes: FlowNode[] = []
   const edges: FlowEdge[] = []
@@ -110,11 +111,36 @@ export function toFlow(
 
   const entities = root === undefined ? graph.listEntities() : graph.session(root)
   const inScope = new Set(entities.map((e) => e.id))
+  /**
+   * アーカイブした版はグラフからも外す（D-032）。**既定では外さない**——
+   * 写し取りは記録どおりに写し、隠すかどうかは見る側が決める
+   */
+  const hidden = new Set<Iri>(
+    options.hideArchived ? entities.filter((e) => graph.isArchived(e.id)).map((e) => e.id) : [],
+  )
   const activities = graph
     .listActivities()
-    .filter((a) => inScope.has(a.generated))
+    .filter((a) => inScope.has(a.generated) && !hidden.has(a.generated))
+
+  /**
+   * 隠した版の上にある、**見えている一番近い版**。繋ぎ直す先を探す。
+   * 見つからない（根まで全部隠れている）なら、その子は根として描かれる
+   */
+  const visibleAncestor = (id: Iri): Iri | undefined => {
+    const seen = new Set<Iri>()
+    let current: Iri | undefined = id
+    while (current !== undefined && hidden.has(current) && !seen.has(current)) {
+      seen.add(current)
+      const act = graph.activityThatGenerated(current)
+      current = act?.branchedFrom ?? act?.used[0]
+    }
+    return current !== undefined && inScope.has(current) && !hidden.has(current)
+      ? current
+      : undefined
+  }
 
   for (const entity of entities) {
+    if (hidden.has(entity.id)) continue
     nodes.push({
       id: entity.id,
       type: 'image',
@@ -131,6 +157,7 @@ export function toFlow(
 
   // 出し直して食い違った版は、元の版と線で結ぶ。派生ではないので見た目を変える
   for (const entity of entities) {
+    if (hidden.has(entity.id) || hidden.has(entity.alternateOf ?? '')) continue
     if (entity.alternateOf && inScope.has(entity.alternateOf)) {
       edges.push({
         id: `${entity.alternateOf}~${entity.id}`,
@@ -207,12 +234,30 @@ export function toFlow(
       },
     })
 
+    const relinked = new Set<Iri>()
     for (const used of activity.used) {
+      if (!hidden.has(used)) {
+        edges.push({
+          id: `${used}->${activity.id}`,
+          source: used,
+          target: activity.id,
+          data: { kind: 'used' },
+        })
+        continue
+      }
+      /**
+       * 親を隠したときは、**その上の見えている版へ繋ぎ直す**（D-032）。
+       * 辺ごと落とすと、子の版が「どこから来たか」を辿れなくなる。
+       * 直接の派生ではないので、見た目は別にする
+       */
+      const ancestor = visibleAncestor(used)
+      if (ancestor === undefined || relinked.has(ancestor)) continue
+      relinked.add(ancestor)
       edges.push({
-        id: `${used}->${activity.id}`,
-        source: used,
+        id: `${ancestor}=>${activity.id}`,
+        source: ancestor,
         target: activity.id,
-        data: { kind: 'used' },
+        data: { kind: 'skipped' },
       })
     }
     for (const ref of activity.referenced) {
