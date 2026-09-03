@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.25](https://github.com/kumagallium/PROVision/compare/v0.2.24...v0.2.25) - 2026-09-03
+
+- fix(ui): アーカイブはグラフからも外す。言葉も「アーカイブ」に統一する by @kumagallium in https://github.com/kumagallium/PROVision/pull/70
+
 ## [v0.2.24](https://github.com/kumagallium/PROVision/compare/v0.2.23...v0.2.24) - 2026-09-03
 
 - feat(ui): 気に入らない版を消さずに「よけておく」 by @kumagallium in https://github.com/kumagallium/PROVision/pull/68
