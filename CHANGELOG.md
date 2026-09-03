@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.28](https://github.com/kumagallium/PROVision/compare/v0.2.27...v0.2.28) - 2026-09-03
+
+- fix(prompt): 日本語のまま編集へ渡さない by @kumagallium in https://github.com/kumagallium/PROVision/pull/76
+
 ## [v0.2.27](https://github.com/kumagallium/PROVision/compare/v0.2.26...v0.2.27) - 2026-09-03
 
 - fix(setup): 任意の道具が足りなくても、生成が動けば入れる手立てが消えていた by @kumagallium in https://github.com/kumagallium/PROVision/pull/74
