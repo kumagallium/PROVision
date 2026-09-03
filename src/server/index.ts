@@ -685,6 +685,28 @@ app.delete('/api/session', async (c) => {
 })
 
 /**
+ * その版をよけておく／戻す（D-032）。**消さない。**
+ *
+ * 気に入らない版は散らかるが、**選ばなかったことは図版の来歴の一部**である（D-018）。
+ * 生成の記録は 1 文字も書き換えず、表明を 1 本足す（D-008）ので、いつでも戻せる。
+ */
+app.post('/api/archive', async (c) => {
+  const body = (await c.req.json()) as { entity?: string; archived?: boolean }
+  try {
+    graph.assertArchived({
+      entity: String(body.entity ?? ''),
+      archived: body.archived !== false,
+      at: new Date().toISOString(),
+      agents: [(await personAgent()).id],
+    })
+    await persist()
+    return c.json({ graph: toProvJsonLd(graph) })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400)
+  }
+})
+
+/**
  * その版をもう一度出す。**「再実行できる」という主張を実際に検査する。**
  *
  * 記録どおりの prompt / model / seed / steps / サイズで走らせ、

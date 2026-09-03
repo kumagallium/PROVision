@@ -28,6 +28,16 @@ import type { ArrowSelection } from './arrow-dialog.js'
 import type { EditRegionSelection } from './edit-region-dialog.js'
 
 /** 誰がこの一手を決めたか（D-031）。記録の生値は「この版の詳細」に出るので、ここは読める言葉で */
+const SMALL_BUTTON: React.CSSProperties = {
+  border: '1px solid #d8dfe3',
+  borderRadius: 7,
+  background: '#fff',
+  padding: '5px 10px',
+  fontSize: 12,
+  cursor: 'pointer',
+}
+
+/** 誰がこの一手を決めたか（D-031）。記録の生値は「この版の詳細」に出るので、ここは読める言葉で */
 const PLANNING_LABELS: Record<'rules' | 'llm' | 'author', string> = {
   rules: '規則',
   llm: 'AI',
@@ -64,6 +74,9 @@ export function ChatPane({
   /** エラーに付いてきた印。文言ではなく、これで導入へ誘導する（D-029） */
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [routingNotice, setRoutingNotice] = useState<string | null>(null)
+  /** よけた版も出すか（D-032）。会話を開き直せば既定（隠す）に戻る */
+  const [showArchived, setShowArchived] = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const [editRegionOpen, setEditRegionOpen] = useState(false)
   /** 1 回の送信で出す候補の数（D-018）。**指示から数は読み取らない** */
   const [variants, setVariants] = useState(1)
@@ -94,6 +107,29 @@ export function ChatPane({
   useEffect(() => {
     onProgress?.(busy ? { done: born.length, total: variants } : null)
   }, [busy, born.length, variants, onProgress])
+
+  /** よけた版を出し入れする。**記録は書き換わらない**——表明が 1 本増える（D-032） */
+  async function toggleArchive() {
+    if (!current || archiving) return
+    setArchiving(true)
+    setError(null)
+    try {
+      const response = await apiFetch('api/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity: current, archived: graph?.isArchived(current) !== true }),
+      })
+      const body = (await response.json()) as { graph?: ProvJsonLdDocument; error?: string }
+      if (!response.ok || body.error || !body.graph) {
+        throw new Error(body.error ?? `よけられませんでした（${response.status}）`)
+      }
+      onGraph(body.graph)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setArchiving(false)
+    }
+  }
 
   useEffect(() => {
     setEditRegion(null)
@@ -243,14 +279,24 @@ export function ChatPane({
                   .filter((e): e is ImageEntity => e !== undefined)
               : []
           const shown = siblings.length > 1 ? siblings : entity ? [entity] : []
-          const thumbWidth = shown.length > 1 ? 104 : 220
+          /**
+           * よけた版（D-032）は候補の並びから外す。**いま見ている版だけは外さない**——
+           * 選んでいるものが消えると、自分がどこに居るのか分からなくなる
+           */
+          const archivedHere = shown.filter(
+            (e) => graph?.isArchived(e.id) === true && e.id !== current,
+          )
+          const visible = showArchived
+            ? shown
+            : shown.filter((e) => !archivedHere.some((a) => a.id === e.id))
+          const thumbWidth = visible.length > 1 ? 104 : 220
           /**
            * 候補どうしで**実際に何が違うのか**を出す。intent は揃っていて、違うのは
            * seed と実行された全文（D-018）。全部同じ文なら seed 違いなので、文は出さない
            */
           const promptOf = (id: string) => graph?.activityThatGenerated(id)?.prompt ?? ''
           const promptsDiffer =
-            shown.length > 1 && new Set(shown.map((e) => promptOf(e.id))).size > 1
+            visible.length > 1 && new Set(visible.map((e) => promptOf(e.id))).size > 1
           return (
             <div key={a.id} style={{ marginBottom: 16 }}>
               <div
@@ -266,16 +312,17 @@ export function ChatPane({
               >
                 {a.intent ?? <span style={{ color: '#7b8892' }}>（最初の指示）{a.label}</span>}
               </div>
-              {shown.length > 1 ? (
+              {visible.length > 1 ? (
                 <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 6 }}>
-                  {parent ? 'この版から生えた' : 'この指示から出た'} {shown.length} 件
+                  {parent ? 'この版から生えた' : 'この指示から出た'} {visible.length} 件
                 </div>
               ) : null}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {shown.map((candidate) => {
+                {visible.map((candidate) => {
                   const act = graph?.activityThatGenerated(candidate.id)
+                  const isArchived = graph?.isArchived(candidate.id) === true
                   return (
-                    <div key={candidate.id} style={{ width: thumbWidth }}>
+                    <div key={candidate.id} style={{ width: thumbWidth, opacity: isArchived ? 0.45 : 1 }}>
                       <button
                         type="button"
                         onClick={() => onSelect(candidate.id)}
@@ -346,6 +393,25 @@ export function ChatPane({
                   )
                 })}
               </div>
+              {archivedHere.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived(!showArchived)}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    padding: '4px 0 0',
+                    fontSize: 10,
+                    color: '#8b98a1',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  {showArchived
+                    ? `よけた版 ${archivedHere.length} 件も出しています（隠す）`
+                    : `よけた版 ${archivedHere.length} 件を表示`}
+                </button>
+              ) : null}
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
                 seed {a.seed} · {a.model}
                 {a.selectedTool
@@ -358,6 +424,22 @@ export function ChatPane({
 
         {current && chain.length > 0 ? (
           <>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+              {/* 気に入らない版は消さずによけておく（D-032）。表明が 1 本増えるだけで戻せる */}
+              <button
+                type="button"
+                onClick={() => void toggleArchive()}
+                disabled={busy || archiving}
+                style={SMALL_BUTTON}
+              >
+                {graph?.isArchived(current) ? 'よけたのを戻す' : 'この版をよけておく'}
+              </button>
+              {graph?.isArchived(current) ? (
+                <span style={{ fontSize: 11, color: '#8b98a1' }}>
+                  よけてあります。候補の並びから外れ、グラフでは薄く出ます
+                </span>
+              ) : null}
+            </div>
             {/* 清書が効かなかったときに、その場で直して出し直せるようにする（D-031） */}
             <PromptRedoPanel
               graph={graph}
