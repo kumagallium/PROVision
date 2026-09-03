@@ -79,7 +79,12 @@ export interface GenerationActivity extends ReproducibleSpec {
     | 'synthesized'
     | 'external'
   /** ツール選択の方法と、実際に選択された許可済みツール */
-  planningMode?: 'rules' | 'llm'
+  /**
+   * この一手を決めたのは誰か。`rules` は語で判定する規則、`llm` はプランナー、
+   * `author` は**利用者が清書を自分で書いた**とき（D-031）。手書きの清書はプランナーを
+   * 通らないので、`llm` と書くと嘘になる
+   */
+  planningMode?: 'rules' | 'llm' | 'author'
   plannerProvider?: string
   plannerModel?: string
   selectedTool?: string

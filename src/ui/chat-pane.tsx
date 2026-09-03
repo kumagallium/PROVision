@@ -23,8 +23,16 @@ import { apiFetch } from './api-base.js'
 import { EditRegionDialog } from './edit-region-dialog.js'
 import { SourcePicker } from './source-picker.js'
 import { ArrowDialog } from './arrow-dialog.js'
+import { PromptRedoPanel } from './prompt-redo.js'
 import type { ArrowSelection } from './arrow-dialog.js'
 import type { EditRegionSelection } from './edit-region-dialog.js'
+
+/** 誰がこの一手を決めたか（D-031）。記録の生値は「この版の詳細」に出るので、ここは読める言葉で */
+const PLANNING_LABELS: Record<'rules' | 'llm' | 'author', string> = {
+  rules: '規則',
+  llm: 'AI',
+  author: '清書は自分で書いた',
+}
 
 interface Props {
   graph: ProvGraph | null
@@ -340,20 +348,32 @@ export function ChatPane({
               </div>
               <div style={{ fontSize: 10, color: '#8b98a1', marginTop: 4 }}>
                 seed {a.seed} · {a.model}
-                {a.selectedTool ? ` · ${a.selectedTool} (${a.planningMode ?? 'rules'})` : ''}
+                {a.selectedTool
+                  ? ` · ${a.selectedTool}（${PLANNING_LABELS[a.planningMode ?? 'rules']}）`
+                  : ''}
               </div>
             </div>
           )
         })}
 
         {current && chain.length > 0 ? (
-          <details style={{ marginTop: 4 }}>
-            <summary style={{ fontSize: 12, color: '#5c6b73', cursor: 'pointer' }}>
-              この版の詳細（再実行に要る情報・基づくデータ・掲載）
-            </summary>
-            <DetailPanel graph={graph} entityId={current} />
-            <AssertPanel graph={graph} entityId={current} onGraph={onGraph} />
-          </details>
+          <>
+            {/* 清書が効かなかったときに、その場で直して出し直せるようにする（D-031） */}
+            <PromptRedoPanel
+              graph={graph}
+              entityId={current}
+              onGraph={onGraph}
+              onSelect={onSelect}
+              disabled={busy}
+            />
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ fontSize: 12, color: '#5c6b73', cursor: 'pointer' }}>
+                この版の詳細（再実行に要る情報・基づくデータ・掲載）
+              </summary>
+              <DetailPanel graph={graph} entityId={current} />
+              <AssertPanel graph={graph} entityId={current} onGraph={onGraph} />
+            </details>
+          </>
         ) : null}
 
         {busy ? (

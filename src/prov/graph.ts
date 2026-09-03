@@ -81,7 +81,7 @@ export interface RecordGenerationInput {
   commandTemplate?: string
   reproducibility?: 'deterministic' | 'environment-dependent' | 'stochastic' | 'external'
   pixelOrigin?: 'geometric' | 'annotated' | 'photometric' | 'removed' | 'synthesized' | 'external'
-  planningMode?: 'rules' | 'llm'
+  planningMode?: 'rules' | 'llm' | 'author'
   plannerProvider?: string
   plannerModel?: string
   selectedTool?: string

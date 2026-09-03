@@ -183,6 +183,24 @@ describe('PROV-JSONLD', () => {
     expect(activity.toolArguments).toBe('{}')
   })
 
+  it('清書を利用者が書いた一手を、そのまま持ち帰れる（D-031）', () => {
+    const graph = new ProvGraph()
+    graph.recordGeneration({
+      image: new TextEncoder().encode('by hand'),
+      label: '手で書いた清書',
+      prompt: 'one tapering arm with round suckers, no octopus, no head',
+      model: 'z-image-turbo-6bit',
+      seed: 7,
+      // プランナーを通っていないので llm とは書けない。決めたのは利用者である
+      planningMode: 'author',
+      selectedTool: 'image.generate',
+      startedAtTime: '2026-09-03T10:00:00Z',
+      endedAtTime: '2026-09-03T10:01:00Z',
+    })
+    const restored = fromProvJsonLd(toProvJsonLd(graph), DEFAULT_BASE)
+    expect(restored.listActivities()[0]!.planningMode).toBe('author')
+  })
+
   it('読み戻したグラフでも系譜を辿れる', () => {
     const original = sampleGraph()
     const restored = fromProvJsonLd(toProvJsonLd(original), DEFAULT_BASE)
