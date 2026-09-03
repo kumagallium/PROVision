@@ -579,15 +579,25 @@ export function SettingsDialog({
       (wantInpaint && !setup.inpaint.found ? setup.requiredGB.inpaint : 0) +
       (wantBackground && !setup.background.found ? setup.requiredGB.background : 0)
     : 0
-  const setupComplete = Boolean(
-    setup?.ready &&
-      (!wantEditModel || setup.editModel.found) &&
-      (!wantInpaint || setup.inpaint.found) &&
-      (!wantBackground || setup.background.found),
+  /**
+   * **本当に全部あるか。** 生成が動くかどうか（`ready`）だけで「揃っている」と
+   * していたため、任意の道具が「無し」でもチェック欄ごと消えて、**入れる手立てが
+   * 画面から無くなっていた**（利用者の報告）。任意のものも数える
+   */
+  const allPresent = Boolean(
+    setup?.ready && setup.editModel.found && setup.inpaint.found && setup.background.found,
+  )
+  /** いま押したら何かが入るか。選ばれていない任意の道具は数えない */
+  const wantsSomethingMissing = Boolean(
+    setup &&
+      (!setup.ready ||
+        (wantEditModel && !setup.editModel.found) ||
+        (wantInpaint && !setup.inpaint.found) ||
+        (wantBackground && !setup.background.found)),
   )
   /** ここから触ってよい環境か。対象外の環境と、環境変数で自分で管理している人は除く */
   const setupEditable = Boolean(setup && setup.supported && !setup.managedByEnv)
-  const canStartSetup = setupEditable && !setupComplete && !setupRunning
+  const canStartSetup = setupEditable && wantsSomethingMissing && !setupRunning
   const setupRows = setup
     ? [
         {
@@ -900,7 +910,7 @@ export function SettingsDialog({
                     {setupRequiredGB > 0 ? ` / 入れるのに約 ${setupRequiredGB}GB` : ''}
                   </p>
 
-                  {setupEditable && !setupComplete ? (
+                  {setupEditable && !allPresent ? (
                     <div
                       style={{
                         display: 'flex',
@@ -996,14 +1006,20 @@ export function SettingsDialog({
                         >
                           {setupStarting
                             ? '始めています…'
-                            : setupComplete
+                            : allPresent
                               ? '揃っています'
                               : '足りないものを入れる'}
                         </button>
                       )}
-                      {!setupComplete && !setupRunning ? (
+                      {canStartSetup ? (
                         <span style={{ fontSize: 11.5, color: '#5c6b73' }}>
                           モデルの取得は回線次第で数十分かかります。アプリを閉じると止まりますが、続きから再開できます。
+                        </span>
+                      ) : null}
+                      {!canStartSetup && !allPresent && !setupRunning ? (
+                        // 押せない理由を言う。黙って灰色だと、壊れているように見える
+                        <span style={{ fontSize: 11.5, color: '#5c6b73' }}>
+                          入れるものにチェックを入れてください。
                         </span>
                       ) : null}
                     </div>
