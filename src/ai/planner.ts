@@ -658,6 +658,40 @@ export async function proposeVariantPrompts(input: {
 }
 
 /**
+ * **訳すことだけ**を頼む（D-033）。清書（`rewriteInstruction`）は訳と具体化と
+ * 制約の書き分けを一度に求めるので、小さなモデルは JSON ごと崩して落ちる。
+ * そこで落ちたときの最後の一手として、**注文を 1 つに絞って**もう一度だけ頼む。
+ * 具体化はできなくても、**日本語のまま画像モデルへ渡すよりはるかにましである**。
+ */
+export async function translateInstruction(input: {
+  intent: string
+  text?: string
+  planner: AiPlannerConfig & { apiKey: string }
+  signal?: AbortSignal
+}): Promise<string> {
+  const prompt = [
+    'Translate the user instruction into English for an image model.',
+    'Return JSON only: {"prompt":"..."}.',
+    'Translate faithfully. Do not add or drop anything. Do not explain.',
+    ...(input.text
+      ? [`Keep the exact string ${JSON.stringify(input.text)} untranslated.`]
+      : []),
+    `User instruction: ${JSON.stringify(input.intent)}`,
+  ].join('\n')
+
+  const parsed = extractJson(await callPlanner(input.planner, prompt, input.signal)) as {
+    prompt?: unknown
+  }
+  const translated =
+    typeof parsed.prompt === 'string' ? parsed.prompt.replace(/\s+/g, ' ').trim() : ''
+  if (!translated || translated.length > MAX_REWRITTEN_PROMPT_LENGTH) {
+    throw new Error('訳が空か、長さの上限を超えました')
+  }
+  if (needsTranslation(translated, input.text)) throw new Error('訳に日本語が残っています')
+  return translated
+}
+
+/**
  * 清書だけをもう一度頼む（D-026）。
  *
  * **ツールの選択はやり直さない。** 実測では振り分けは当たっていたのに清書だけが
@@ -781,10 +815,29 @@ export async function planImageOperation(input: {
           }),
         }
       } catch (error) {
-        // 計画は捨てない。選ばれたツールは当たっている（D-013）
-        planned.warning = `指示を英語へ書き直せなかったため、利用者の言葉のまま画像モデルへ渡します: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        /**
+         * 清書に失敗したら、**訳すことだけ**をもう一度頼む（D-033）。
+         * 具体化は諦めるが、日本語のまま渡すよりはるかにましである。
+         * 計画は捨てない——選ばれたツールは当たっている（D-013）
+         */
+        try {
+          planned.plan = {
+            ...plan,
+            prompt: await translateInstruction({
+              intent: input.intent,
+              ...(plan.arguments.text ? { text: plan.arguments.text } : {}),
+              planner,
+              ...(input.signal ? { signal: input.signal } : {}),
+            }),
+          }
+          planned.warning = `清書に失敗したので、訳しただけの文で走らせます（${
+            error instanceof Error ? error.message : String(error)
+          }）`
+        } catch (second) {
+          planned.warning = `指示を英語へ書き直せなかったため、利用者の言葉のまま画像モデルへ渡します: ${
+            second instanceof Error ? second.message : String(second)
+          }`
+        }
       }
     }
     return planned
