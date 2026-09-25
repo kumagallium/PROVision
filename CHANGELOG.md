@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.31](https://github.com/kumagallium/PROVision/compare/v0.2.30...v0.2.31) - 2026-09-25
+
+- feat: 生成の停止とコンセプトノードの可読性を改善する by @kumagallium in https://github.com/kumagallium/PROVision/pull/91
+
 ## [v0.2.30](https://github.com/kumagallium/PROVision/compare/v0.2.29...v0.2.30) - 2026-09-25
 
 - fix(image): 候補コンセプトを日本語で表示する by @kumagallium in https://github.com/kumagallium/PROVision/pull/89
