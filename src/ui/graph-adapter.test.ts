@@ -119,6 +119,7 @@ describe('React Flow への写し取り', () => {
     ])
     expect(activities.every((n) => n.data.planned === true)).toBe(true)
     expect(activities.every((n) => n.data.label === 'タコの 8 のアイコン')).toBe(true)
+    expect(activities.map((n) => n.data.concept).sort()).toEqual(['a', 'b'])
   })
 
   it('清書を使わない道具や、意図と同じ文しか無い記録には清書を付けない', () => {

@@ -581,6 +581,8 @@ app.get('/api/images/:name', async (c) => {
 interface GenerateBody {
   /** 利用者が書いた指示。そのまま provision:intent になる */
   intent: string
+  /** この送信だけを停止するためのID。画面が生成して渡す */
+  requestId?: string
   /** 実際にモデルへ渡す文字列。省略時は親のプロンプトに intent を足す */
   prompt?: string
   /** 分岐元の画像 Entity。省略すると新しい根になる */
@@ -603,6 +605,9 @@ interface GenerateBody {
 
 /** 一度に足せる材料の数。parent と合わせて 4 枚まで */
 const MAX_EXTRA_SOURCES = 3
+
+/** 進行中の送信だけを保持する。完了時には必ず消す */
+const activeGenerations = new Map<string, AbortController>()
 
 /**
  * 「この版はこのデータに基づく」と後から表明する。
@@ -1106,6 +1111,14 @@ app.post('/api/import', async (c) => {
   }
 })
 
+app.post('/api/generate/cancel', async (c) => {
+  const body = (await c.req.json()) as { requestId?: string }
+  const controller = body.requestId ? activeGenerations.get(body.requestId) : undefined
+  if (!controller) return c.json({ cancelled: false }, 404)
+  controller.abort()
+  return c.json({ cancelled: true })
+})
+
 app.post('/api/generate', async (c) => {
   const body = (await c.req.json()) as GenerateBody
   if (!body.intent?.trim() && !body.prompt?.trim()) {
@@ -1116,6 +1129,18 @@ app.post('/api/generate', async (c) => {
   if (body.parent && !graph.getEntity(body.parent)) {
     return c.json({ error: `その版はグラフにありません: ${body.parent}` }, 400)
   }
+
+  const requestId = body.requestId?.trim()
+  if (requestId && !/^[0-9a-f-]{36}$/i.test(requestId)) {
+    return c.json({ error: '生成リクエストIDが不正です' }, 400)
+  }
+  if (requestId && activeGenerations.has(requestId)) {
+    return c.json({ error: '同じ生成リクエストIDが使用中です' }, 409)
+  }
+  const controller = new AbortController()
+  const signal = controller.signal
+  if (requestId) activeGenerations.set(requestId, controller)
+  const entities: ImageEntity[] = []
 
   try {
     /**
@@ -1193,6 +1218,7 @@ app.post('/api/generate', async (c) => {
       : []
     const planning = await planImageOperation({
       intent: instruction,
+      signal,
       context: {
         hasSourceImage: Boolean(source),
         hasEditRegion: Boolean(body.maskImage),
@@ -1210,6 +1236,7 @@ app.post('/api/generate', async (c) => {
       lineage: lineageIntents,
       planner: await plannerCredentials(CONFIG_DIR),
     })
+    signal.throwIfAborted()
     const plan = planning.plan
     // 保存を求める文は条件形なので外しても壊れないが、作り替えは強く促したい（D-023）
     const editScope = editScopeOf(plan, instruction)
@@ -1239,6 +1266,7 @@ app.post('/api/generate', async (c) => {
             imageDigest: source.digest,
             maskPath: maskImage.path,
             maskDigest: maskImage.digest,
+            signal,
           }
         : undefined
     if (useInpainting && !inpaintInput) {
@@ -1274,6 +1302,7 @@ app.post('/api/generate', async (c) => {
             imagePath: source.path,
             imageDigest: source.digest,
             command: resolveBackgroundRemovalCommand(),
+            signal,
           }
         : undefined
     // 親画像を入力できるときは、親の全文プロンプトを次へ持ち越さない。
@@ -1346,8 +1375,10 @@ app.post('/api/generate', async (c) => {
             ...(plan.arguments.text ? { text: plan.arguments.text } : {}),
             lineage: lineageIntents,
             planner,
+            signal,
           })
         } catch (error) {
+          if (signal.aborted) throw error
           return c.json(
             {
               error: `方向の違うコンセプトを作れなかったため、画像を生成しませんでした: ${
@@ -1388,15 +1419,15 @@ app.post('/api/generate', async (c) => {
      * 複数の会話に割れる。1 本だけのときは作らない——Activity の
      * `provision:intent` が同じことを言っており、足しても言えることが増えない
      */
-    const sendPlan =
-      variants.length > 1 ? graph.addPlan(instruction, new Date(stamp).toISOString()) : undefined
+    let sendPlan: ReturnType<typeof graph.addPlan> | undefined
 
-    const entities: ImageEntity[] = []
     let firstError: unknown
     for (const { prompt, seed, concept } of variants) {
+      signal.throwIfAborted()
       try {
         entities.push(
           await serial(async () => {
+            signal.throwIfAborted()
             const key = inpaintInput
               ? inpaintCacheKeyOf(inpaintInput)
               : standardInput
@@ -1431,17 +1462,19 @@ app.post('/api/generate', async (c) => {
                   ? await processStandardImage(standardInput)
                   : backgroundInput
                     ? await removeBackground(backgroundInput)
-                : await generateImage({
-                    prompt,
-                    seed,
-                    ...(conditioningImage
-                      ? {
-                          imagePath: conditioningImage.path,
-                          imageDigest: conditioningImage.digest,
-                          imageStrength: IMAGE_EDIT_STRENGTH,
-                        }
-                      : {}),
-                  })
+                  : await generateImage({
+                      prompt,
+                      seed,
+                      signal,
+                      ...(conditioningImage
+                        ? {
+                            imagePath: conditioningImage.path,
+                            imageDigest: conditioningImage.digest,
+                            imageStrength: IMAGE_EDIT_STRENGTH,
+                          }
+                        : {}),
+                    })
+              signal.throwIfAborted()
               await writeFile(cachedPng, result.png)
               await writeFile(
                 cachedMeta,
@@ -1459,12 +1492,17 @@ app.post('/api/generate', async (c) => {
               )
             }
 
+            signal.throwIfAborted()
+
             // 絵の内容だけを数える。PNG のファイル全体だと生成時刻で毎回変わる
             const digest = imageContentDigest(result.png)
             const path = join(IMAGE_DIR, `${digest.slice(0, 16)}.png`)
             await writeFile(path, result.png)
             const dimensions = pngDimensions(result.png)
 
+            if (variants.length > 1 && !sendPlan) {
+              sendPlan = graph.addPlan(instruction, new Date(stamp).toISOString())
+            }
             const recorded = graph.recordGeneration({
               image: { digest },
               label: concept
@@ -1504,7 +1542,7 @@ app.post('/api/generate', async (c) => {
                   }
                 : {}),
               ...(sendPlan ? { planId: sendPlan.id } : {}),
-            planningMode: planning.mode,
+              planningMode: planning.mode,
               ...(planning.plannerProvider ? { plannerProvider: planning.plannerProvider } : {}),
               ...(planning.plannerModel ? { plannerModel: planning.plannerModel } : {}),
               selectedTool: plan.tool,
@@ -1532,9 +1570,11 @@ app.post('/api/generate', async (c) => {
           }),
         )
       } catch (error) {
+        if (signal.aborted) throw error
         if (firstError === undefined) firstError = error
       }
     }
+    signal.throwIfAborted()
     // 全部落ちたときだけ失敗として返す。1 枚でも出ていれば、出た分は捨てない
     if (entities.length === 0) throw firstError ?? new Error('生成に失敗しました')
     if (entities.length < variants.length) {
@@ -1560,6 +1600,9 @@ app.post('/api/generate', async (c) => {
       },
     })
   } catch (error) {
+    if (signal.aborted) {
+      return c.json({ cancelled: true, entities, graph: toProvJsonLd(graph) })
+    }
     // 画像が変わらなかったのは利用者側の指示の問題で、サーバの故障ではない
     if (error instanceof UnchangedImageError) {
       return c.json(
@@ -1585,6 +1628,8 @@ app.post('/api/generate', async (c) => {
       return c.json({ error: why, code: error.code }, 503)
     }
     return c.json({ error: why }, 500)
+  } finally {
+    if (requestId) activeGenerations.delete(requestId)
   }
 })
 
