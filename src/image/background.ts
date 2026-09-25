@@ -14,6 +14,7 @@ export interface BackgroundRemovalInput {
   imagePath: string
   imageDigest: string
   command?: string
+  signal?: AbortSignal
 }
 
 export function backgroundRemovalCacheKeyOf(input: BackgroundRemovalInput): string {
@@ -52,6 +53,7 @@ export function resolveBackgroundRemovalCommand(
 export async function removeBackground(
   input: BackgroundRemovalInput,
 ): Promise<GenerateResult> {
+  input.signal?.throwIfAborted()
   if (!existsSync(input.imagePath)) {
     throw new Error(`編集元の画像が見つかりません: ${input.imagePath}`)
   }
@@ -65,7 +67,8 @@ export async function removeBackground(
   const [bin] = args.splice(0, 1)
   const startedAtTime = new Date().toISOString()
   try {
-    await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024 })
+    await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024, signal: input.signal })
+    input.signal?.throwIfAborted()
     if (!existsSync(out)) throw new Error('rembgが出力PNGを作りませんでした')
     return {
       png: new Uint8Array(await readFile(out)),
@@ -75,6 +78,7 @@ export async function removeBackground(
       endedAtTime: new Date().toISOString(),
     }
   } catch (error) {
+    if (input.signal?.aborted) throw error
     throw new Error(
       `背景透明化に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
     )

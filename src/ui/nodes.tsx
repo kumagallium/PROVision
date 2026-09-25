@@ -113,24 +113,14 @@ export function ImageNode({ data, selected }: NodeProps) {
   )
 }
 
-/** 清書（実行された全文）。見出しより軽く、行数で刈る。全文はホバーと右の詳細で読める */
-const prompt = (lines: number): React.CSSProperties => ({
-  padding: '0 10px 6px',
-  color: '#3f4a52',
-  fontSize: 11.5,
-  display: '-webkit-box',
-  WebkitLineClamp: lines,
-  WebkitBoxOrient: 'vertical',
-  overflow: 'hidden',
-})
-
 /**
- * 生成（prov:Activity）。見せるのは**実行された全文（清書）**（D-030）。
+ * 生成（prov:Activity）。候補のコンセプトと実行された清書を区別して見せる。
  *
  * 意図（利用者の生の言葉）を見出しにしていたが、候補は同じ意図から出るので
  * 兄弟の節点が全部同じ文になり、**候補ごとに違うもの（清書と seed）が隠れていた**。
  * 意図は指示の節点（D-022）が出す。指示の節点が無い 1 本だけの送信では、
  * ここに意図も添える——「なぜ」と「何を渡したか」の両方が要る。
+ * 長い全文はホバーと右の詳細で読める。節点は読みやすい行数に収める。
  */
 export function ActivityNode({ data, selected }: NodeProps) {
   const d = data as FlowNodeData
@@ -138,14 +128,46 @@ export function ActivityNode({ data, selected }: NodeProps) {
   const a = d.activity
   // 指示の節点が意図を出しているなら、ここでは繰り返さない。清書が無ければ意図しか無い
   const showIntent = !d.planned || !d.prompt
-  const hover = [showIntent ? undefined : d.label, d.prompt].filter(Boolean).join('\n\n') || d.label
+  const heading = d.concept ?? (showIntent ? d.label : undefined)
+  const hover = [heading, d.prompt].filter(Boolean).join('\n\n') || d.label
   return (
-    <div style={{ ...card(c.main, c.bg, selected === true), width: 220 }} title={hover}>
+    <div style={{ ...card(c.main, c.bg, selected === true), width: 248 }} title={hover}>
       <Handle type="target" position={Position.Top} />
-      {showIntent ? <div style={title(c.text, d.prompt ? 2 : 3)}>{d.label}</div> : null}
-      {d.prompt ? <div style={prompt(showIntent ? 3 : 4)}>{d.prompt}</div> : null}
+      <div style={{ padding: '14px 14px 12px' }}>
+        {heading ? (
+          <div>
+            <div style={{ color: c.text, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
+              {d.concept ? 'コンセプト' : '指示'}
+            </div>
+            <div style={{
+              color: '#28343d', fontSize: 13, fontWeight: 600, lineHeight: 1.5,
+              display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden', overflowWrap: 'anywhere',
+            }}>
+              {heading}
+            </div>
+          </div>
+        ) : null}
+        {d.prompt ? (
+          <div style={{ marginTop: heading ? 12 : 0 }}>
+            <div style={{ color: c.text, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
+              生成用プロンプト
+            </div>
+            <div style={{
+              color: '#3f4a52', fontSize: 12, lineHeight: 1.5,
+              display: '-webkit-box', WebkitLineClamp: heading ? 3 : 5,
+              WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
+            }}>
+              {d.prompt}
+            </div>
+          </div>
+        ) : null}
+      </div>
       {a ? (
-        <div style={{ padding: '0 10px 8px', color: '#5c6b73', fontSize: 11 }}>
+        <div style={{
+          padding: '9px 14px 11px', borderTop: '1px solid #dce7f0',
+          color: '#5c6b73', fontSize: 11,
+        }}>
           seed {a.seed} · {a.model}
         </div>
       ) : null}

@@ -1,6 +1,10 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_STEPS,
+  generateImage,
   ImageCommandMissingError,
   cacheKeyOf,
   uvToolBinPath,
@@ -15,6 +19,26 @@ const TEMPLATE =
   '/Users/x/.local/bin/mflux-generate-z-image-turbo ' +
   '--model /Users/x/.cache/geologo/z-image-turbo-4bit --base-model z-image-turbo ' +
   '--prompt-file {promptFile} --seed {seed} --output {out}'
+
+describe('生成の停止', () => {
+  it('実行中の画像生成プロセスを中断できる', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'provision-stop-test-'))
+    const script = join(dir, 'generator.mjs')
+    const previous = process.env.PROVISION_IMAGE_COMMAND
+    await writeFile(script, 'setInterval(() => {}, 1000)\n')
+    process.env.PROVISION_IMAGE_COMMAND = `${process.execPath} ${script} {out}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 150)
+    try {
+      await expect(generateImage({ prompt: 'test', seed: 1, signal: controller.signal })).rejects.toThrow()
+    } finally {
+      clearTimeout(timer)
+      if (previous === undefined) delete process.env.PROVISION_IMAGE_COMMAND
+      else process.env.PROVISION_IMAGE_COMMAND = previous
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 3000)
+})
 
 describe('画像生成コマンドの解決', () => {
   it('編集用コマンドを生成用と分けて解決する', () => {

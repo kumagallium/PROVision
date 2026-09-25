@@ -33,6 +33,8 @@ export const DEFAULT_STEPS = 8
 export interface GenerateInput {
   prompt: string
   seed: number
+  /** 画面からの停止。子プロセスにも伝える */
+  signal?: AbortSignal
   width?: number
   height?: number
   steps?: number
@@ -291,6 +293,7 @@ export function modelIdOf(template: string): string {
 }
 
 export async function generateImage(input: GenerateInput): Promise<GenerateResult> {
+  input.signal?.throwIfAborted()
   const template = input.model
     ? resolveImageCommandForModel(input.model, { edit: Boolean(input.imagePath) })
     : input.imagePath
@@ -363,7 +366,8 @@ export async function generateImage(input: GenerateInput): Promise<GenerateResul
   }
   const startedAtTime = new Date().toISOString()
   try {
-    await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024 })
+    await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024, signal: input.signal })
+    input.signal?.throwIfAborted()
     const png = new Uint8Array(await readFile(out))
     return {
       png,
@@ -373,6 +377,7 @@ export async function generateImage(input: GenerateInput): Promise<GenerateResul
       endedAtTime: new Date().toISOString(),
     }
   } catch (error) {
+    if (input.signal?.aborted) throw error
     const why = error instanceof Error ? error.message : String(error)
     throw new Error(`手元の生成器が PNG を書かなかった: ${why}`)
   } finally {

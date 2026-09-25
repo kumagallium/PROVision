@@ -14,6 +14,7 @@ export interface InpaintInput {
   imageDigest: string
   maskPath: string
   maskDigest: string
+  signal?: AbortSignal
 }
 
 export interface InpaintResult {
@@ -67,6 +68,7 @@ export function resolveInpaintCommand(env: NodeJS.ProcessEnv = process.env): str
 }
 
 export async function inpaintImage(input: InpaintInput): Promise<InpaintResult> {
+  input.signal?.throwIfAborted()
   if (!existsSync(input.imagePath)) {
     throw new Error(`編集元の画像が見つかりません: ${input.imagePath}`)
   }
@@ -91,7 +93,8 @@ export async function inpaintImage(input: InpaintInput): Promise<InpaintResult> 
   const [bin] = args.splice(0, 1)
   const startedAtTime = new Date().toISOString()
   try {
-    await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024 })
+    await execFileAsync(bin!, args, { maxBuffer: 64 * 1024 * 1024, signal: input.signal })
+    input.signal?.throwIfAborted()
     const generated = existsSync(out) ? out : join(outputDir, basename(input.imagePath))
     if (!existsSync(generated)) {
       throw new Error('inpaintingコマンドが出力PNGを作りませんでした')
@@ -104,6 +107,7 @@ export async function inpaintImage(input: InpaintInput): Promise<InpaintResult> 
       endedAtTime: new Date().toISOString(),
     }
   } catch (error) {
+    if (input.signal?.aborted) throw error
     const why = error instanceof Error ? error.message : String(error)
     throw new Error(`LaMaによる範囲編集に失敗しました: ${why}`)
   } finally {

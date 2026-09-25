@@ -26,6 +26,8 @@ export interface FlowNodeData {
    * 意図と同じ文しか無いとき、清書を使わないツールのときは付けない
    */
   prompt?: string
+  /** 生成ノードのみ。完成した版に記録された候補固有のコンセプト */
+  concept?: string
   /** 生成ノードのみ。指示の節点（D-022）から生えている＝意図はそちらが出す */
   planned?: boolean
   /** 別の会話から材料として借りてきた版か（D-021） */
@@ -219,6 +221,7 @@ export function toFlow(
 
   const externals = new Set<Iri>()
   for (const activity of activities) {
+    const generatedLabel = graph.getEntity(activity.generated)?.label
     nodes.push({
       id: activity.id,
       type: 'activity',
@@ -230,6 +233,7 @@ export function toFlow(
         activity,
         // 節点が見せるのは実行された全文（D-030）。意図は指示の節点が出す
         ...(executedPromptOf(activity) ? { prompt: executedPromptOf(activity) } : {}),
+        ...(activity.planId && generatedLabel ? { concept: generatedLabel } : {}),
         planned: activity.planId !== undefined,
       },
     })

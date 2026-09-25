@@ -8,7 +8,7 @@
  * 途中の版を選んでから送れば、そこから枝が生える。分岐は特別な操作ではなく、
  * 「どこに居るか」を変えて送るだけで起きる。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ProvGraph } from '../prov/graph.js'
 import { fromProvJsonLd } from '../prov/jsonld.js'
 import { DEFAULT_BASE } from '../prov/iri.js'
@@ -78,6 +78,8 @@ export function ChatPane({
 }: Props) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const requestIdRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** エラーに付いてきた印。文言ではなく、これで導入へ誘導する（D-029） */
   const [errorCode, setErrorCode] = useState<string | null>(null)
@@ -150,7 +152,9 @@ export function ChatPane({
 
   async function send() {
     const intent = text.trim()
-    if (!intent || busy) return
+    if (!intent || busy || requestIdRef.current) return
+    const requestId = crypto.randomUUID()
+    requestIdRef.current = requestId
     /**
      * **送信の直前にサーバから取り直す。** 画面のグラフが古いと、前の版まで
      * 「この送信で生まれた」と数えてしまい、進み具合が嘘になる
@@ -190,6 +194,7 @@ export function ChatPane({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           intent,
+          requestId,
           ...(current ? { parent: current } : {}),
           ...(variants > 1 ? { variants } : {}),
           ...(extraParents.length > 0 ? { extraParents } : {}),
@@ -214,10 +219,18 @@ export function ChatPane({
               scopeSource?: 'planner' | 'rules'
             }
           }
+        | { cancelled: true; entities: Array<{ id: string }>; graph: ProvJsonLdDocument }
         | { error: string; code?: string }
       if (!res.ok || 'error' in body) {
         if ('error' in body && body.code) setErrorCode(body.code)
         throw new Error('error' in body ? body.error : `生成に失敗（${res.status}）`)
+      }
+      if ('cancelled' in body) {
+        onGraph(body.graph)
+        const last = body.entities.at(-1)
+        if (last) onSelect(last.id)
+        setRoutingNotice(`生成を停止しました。完了済みの ${body.entities.length} 枚は残しています。`)
+        return
       }
       onGraph(body.graph)
       onSelect(body.entity.id)
@@ -242,8 +255,29 @@ export function ChatPane({
       finished = true
       window.clearInterval(poll)
       setBusy(false)
+      setStopping(false)
+      requestIdRef.current = null
       // **ここで消さない。** 終わった瞬間に消すと、グラフの「新」の印も同時に
       // 消える（D-028）。次の送信が始まるときに置き換わるので、消す必要も無い
+    }
+  }
+
+  async function stop() {
+    const requestId = requestIdRef.current
+    if (!requestId || stopping) return
+    setStopping(true)
+    try {
+      const response = await apiFetch('api/generate/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId }),
+      })
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`停止を依頼できませんでした（${response.status}）`)
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
+      setStopping(false)
     }
   }
 
@@ -675,21 +709,24 @@ export function ChatPane({
         />
         <button
           type="button"
-          onClick={() => void send()}
-          disabled={busy || text.trim().length === 0}
+          onClick={() => void (busy ? stop() : send())}
+          disabled={busy ? stopping : text.trim().length === 0}
+          aria-label={busy ? '生成を停止' : undefined}
           style={{
             marginTop: 8,
             width: '100%',
-            padding: '8px 0',
+            minHeight: 40,
+            padding: '8px 12px',
             border: 'none',
             borderRadius: 8,
-            background: busy ? '#b8c6cf' : PALETTE.activity.main,
+            background: busy ? '#ad423a' : PALETTE.activity.main,
             color: '#fff',
             fontSize: 13,
-            cursor: busy ? 'default' : 'pointer',
+            fontWeight: 700,
+            cursor: stopping ? 'default' : 'pointer',
           }}
         >
-          {busy ? '生成中…' : willBranch ? 'ここから分岐して生成' : '生成'}
+          {busy ? (stopping ? '停止中…' : '生成を停止') : willBranch ? 'ここから分岐して生成' : '生成'}
         </button>
       </div>
       </section>
