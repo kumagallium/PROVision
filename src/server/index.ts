@@ -68,6 +68,7 @@ import {
   needsTranslation,
   planImageOperation,
   proposeVariantPrompts,
+  appLogoArtifactConstraint,
   type ImageToolName,
   type PlannedImageOperation,
   validateImagePlan,
@@ -1297,6 +1298,11 @@ app.post('/api/generate', async (c) => {
             plan.prompt !== undefined,
           )
         : instruction
+    const artifactConstraint =
+      plan.tool === 'image.generate' ||
+      (plan.tool === 'image.edit' && /(スマホ|スマートフォン|iPhone|phone|device)/i.test(instruction))
+        ? appLogoArtifactConstraint(instruction, lineageIntents)
+        : undefined
     const usesImageModel =
       plan.tool === 'image.generate' ||
       plan.tool === 'image.edit' ||
@@ -1324,31 +1330,37 @@ app.post('/api/generate', async (c) => {
       ? Math.min(Math.max(Math.trunc(Number(body.variants ?? 1)) || 1, 1), MAX_VARIANTS)
       : 1
     const notices: string[] = []
-    let variantPrompts = [basePrompt]
+    let variantPrompts = [
+      artifactConstraint ? `${basePrompt} ${artifactConstraint}` : basePrompt,
+    ]
     if (wantedVariants > 1) {
       const planner = await plannerCredentials(CONFIG_DIR)
       if (planner?.enabled && planner.modelId.trim()) {
         try {
           variantPrompts = await proposeVariantPrompts({
             intent: instruction,
-            basePrompt,
+            // 新規生成は利用者の目的からコンセプトを起こす。清書の文を種にしない。
+            basePrompt: plan.tool === 'image.generate' ? '' : variantPrompts[0]!,
             count: wantedVariants,
             ...(plan.arguments.text ? { text: plan.arguments.text } : {}),
             lineage: lineageIntents,
             planner,
           })
         } catch (error) {
-          // 方向を作れなかったのは失敗ではない。seed 違いへ落として、そう伝える
-          variantPrompts = Array.from({ length: wantedVariants }, () => basePrompt)
-          notices.push(
-            `方向の違う案を作れなかったので、同じ指示のまま seed だけ変えた候補を出します（${
-              error instanceof Error ? error.message : String(error)
-            }）`,
+          return c.json(
+            {
+              error: `方向の違うコンセプトを作れなかったため、画像を生成しませんでした: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            },
+            502,
           )
         }
       } else {
-        variantPrompts = Array.from({ length: wantedVariants }, () => basePrompt)
-        notices.push('指示のAI解釈が無効なので、同じ指示のまま seed だけ変えた候補を出します')
+        return c.json(
+          { error: '異なるコンセプトの候補を作るには、設定で「指示のAI解釈」を有効にしてください' },
+          400,
+        )
       }
     } else if (usesImageModel && asksForMultipleCandidates(instruction)) {
       // 黙って 1 枚だけ出すのが、この機能が無かったころの問題そのものだった
