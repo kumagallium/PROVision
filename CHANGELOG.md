@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.30](https://github.com/kumagallium/PROVision/compare/v0.2.29...v0.2.30) - 2026-09-25
+
+- fix(image): 候補コンセプトを日本語で表示する by @kumagallium in https://github.com/kumagallium/PROVision/pull/89
+
 ## [v0.2.29](https://github.com/kumagallium/PROVision/compare/v0.2.28...v0.2.29) - 2026-09-25
 
 - fix(image): アプリロゴの出力対象と候補コンセプトを明確にする by @kumagallium in https://github.com/kumagallium/PROVision/pull/87
