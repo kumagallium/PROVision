@@ -635,7 +635,7 @@ export function ChatPane({
           </label>
           <span>
             {variants > 1
-              ? 'AI解釈が有効なら方向の違う案、無効なら seed だけ違う案を出します'
+              ? '異なるコンセプトを作るには「指示のAI解釈」が必要です'
               : '同じ指示から複数の案を出したいときは数を上げます'}
           </span>
         </div>

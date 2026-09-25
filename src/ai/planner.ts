@@ -554,10 +554,12 @@ async function callPlanner(
  * 清書の書き方（D-026）。振り分けと、清書だけの頼み直しで**同じ文言を使う**——
  * 片方だけ直すと、頼み直しで質の違う文が返り、原因が追えなくなる
  */
+const STYLE_REWRITE_RULE = 'Make vague style words concrete, so the image model has something to act on: "flat" becomes flat vector illustration with solid fills and uniform line weight; "simple" becomes few shapes and a limited palette. Expanding a style word the user did use is required. Adding subjects, objects, moods, or lettering the user never mentioned is not.'
 const REWRITE_RULES = [
   'Write it in English. The image model cannot follow Japanese, so leaving the instruction untranslated silently produces a picture that ignores it.',
   'Rewrite faithfully: resolve ambiguity using the lineage and keep every explicit user constraint.',
-  'Make vague style words concrete, so the image model has something to act on: "flat" becomes flat vector illustration with solid fills and uniform line weight; "simple" becomes few shapes and a limited palette. Expanding a style word the user did use is required. Adding subjects, objects, moods, or lettering the user never mentioned is not.',
+  'Distinguish the requested artwork from its usage context. An app logo or app icon means the isolated logo artwork, not an image of a phone displaying the app. Draw a phone only when the user explicitly asks for a phone as part of the design.',
+  STYLE_REWRITE_RULE,
   'State a removal as an explicit absence as well as an action: not only "remove the bow and arrow" but also "no bow, no arrow anywhere in the image".',
   // 実測（同一 seed 3 通り）: "a single octopus tentacle ... no other limbs" は 3/3 でタコ丸ごとが出た。
   // 主語から octopus を外して足だけを描写した文は 3/3 で足 1 本になった
@@ -569,6 +571,23 @@ const REWRITE_RULES = [
 
 /** 1 回の送信で出せる候補の上限。1 枚 1〜3 分の直列実行なので、4 枚で 10 分前後になる */
 export const MAX_VARIANTS = 4
+
+/** アプリ向けロゴの用途を、端末を描く指示と取り違えないための出力条件。 */
+export function appLogoArtifactConstraint(intent: string, lineage: string[] = []): string | undefined {
+  const context = [...lineage, intent].join(' ')
+  const app = /(アプリ|\bapp\b|\bapplication\b)/i
+  const logo = /(ロゴ|アイコン|\blogo\b|\bicon\b)/i
+  const rejectsPhone = /(スマホ|スマートフォン|iPhone|phone|device)/i.test(intent) &&
+    /(不要|いらない|なし|描かない|消し|除去|remove|without|no\s+)/i.test(intent)
+  if (!app.test(context) || !logo.test(context) || (!(app.test(intent) && logo.test(intent)) && !rejectsPhone)) {
+    return undefined
+  }
+  // 端末そのものを図案にしてほしいという明示指示は優先する。
+  if (!rejectsPhone && /(スマホ|スマートフォン|iPhone|phone|device).{0,20}(モチーフ|図案|描いて|入れて|incorporate|depict)/i.test(context)) {
+    return undefined
+  }
+  return 'Create the isolated app logo artwork itself in a square icon composition. Fill the image with the logo design on a simple background. No smartphone, phone screen, device frame, app screenshot, user interface, presentation board, or product mockup.'
+}
 
 /** 全角の数字を半角へ。指示は手で書かれるので、どちらでも来る */
 function normalizeDigits(text: string): string {
@@ -604,7 +623,7 @@ export function asksForMultipleCandidates(intent: string): boolean {
  */
 export async function proposeVariantPrompts(input: {
   intent: string
-  /** 1 案だけ作るときに使う書き直し。ここからばらす */
+  /** 編集では既存の指示。新規生成では空文字にして目的から発想する */
   basePrompt: string
   count: number
   /** 描く文字列が決まっているなら、全案がそれを含まなければならない */
@@ -614,14 +633,19 @@ export async function proposeVariantPrompts(input: {
   signal?: AbortSignal
 }): Promise<string[]> {
   const count = Math.min(Math.max(Math.trunc(input.count), 2), MAX_VARIANTS)
+  const artifactConstraint = appLogoArtifactConstraint(input.intent, input.lineage)
   const prompt = [
-    `You propose ${count} DIFFERENT directions for one image request.`,
-    'Return JSON only: {"prompts":["...","..."]}.',
-    `Give exactly ${count} concise English instructions for an image model.`,
-    'Each must be a genuinely different direction — different composition, metaphor, or visual treatment. Do not restate the same idea in other words.',
+    `You are an art director developing ${count} different visual concepts from one image request.`,
+    'First interpret the user goal, subject, medium, and explicit constraints. Then invent distinct visual concepts from that brief rather than copying or lightly paraphrasing the user instruction or baseline prompt.',
+    'Return JSON only: {"variants":[{"concept":"short English description of the visual idea","prompt":"concise English image-model instruction"}]}.',
+    `Give exactly ${count} variants. Each concept must use a different motif or visual metaphor; changing only colour, layout, style, or seed does not make a new concept.`,
+    'Each prompt must concretely describe only its own concept and the finished artwork. Do not include chat history, explanations, or a mockup of where the artwork will be used.',
     'Keep every explicit user constraint in all of them.',
-    // 候補も同じ経路で画像モデルへ渡る。ここだけ緩いと、候補だけが指示から外れる
-    ...REWRITE_RULES,
+    // コンセプト出しでは新しいモチーフを許す。利用者の明示条件は保持する。
+    ...REWRITE_RULES.filter((rule) => rule !== STYLE_REWRITE_RULE && rule !== 'Up to 4 sentences. Be specific rather than long.'),
+    'Expand requested style words into concrete visual attributes. You may invent a motif or symbol to express the user goal, but never invent product requirements, lettering, or usage context.',
+    'Use up to 4 sentences in each image prompt. Be specific rather than long.',
+    ...(artifactConstraint ? [`Required output format for every variant: ${artifactConstraint}`] : []),
     ...(input.text
       ? [`Every prompt must contain the exact string ${JSON.stringify(input.text)}.`]
       : []),
@@ -629,32 +653,43 @@ export async function proposeVariantPrompts(input: {
       ? [`Prior instructions in this lineage (oldest first): ${JSON.stringify(input.lineage)}`]
       : []),
     `User instruction: ${JSON.stringify(input.intent)}`,
-    `Baseline prompt: ${JSON.stringify(input.basePrompt)}`,
+    ...(input.basePrompt.trim()
+      ? [`Existing artwork instruction for edit context: ${JSON.stringify(input.basePrompt)}`]
+      : []),
   ].join('\n')
 
   const parsed = extractJson(await callPlanner(input.planner, prompt, input.signal)) as {
-    prompts?: unknown
+    variants?: unknown
   }
-  const unique = [
-    ...new Set(
-      (Array.isArray(parsed.prompts) ? parsed.prompts : [])
-        .filter((value): value is string => typeof value === 'string')
-        .map((value) => value.replace(/\s+/g, ' ').trim())
-        .filter(
-          (value) =>
-            value.length > 0 &&
-            value.length <= MAX_REWRITTEN_PROMPT_LENGTH &&
-            !/[\u0000-\u001f\u007f]/.test(value) &&
-            // 訳し漏れた案は画像モデルが汲めない。seed 違いへ落ちるほうがまだ良い
-            !needsTranslation(value, input.text),
-        )
-        // 推定した文字列が落ちると、描画対象が失われる（validateImagePlan と同じ縛り）
-        .filter((value) => !input.text || value.includes(input.text)),
-    ),
-  ]
-  // 1 案しか残らないなら候補になっていない。seed 違いへ落として、そう伝える
-  if (unique.length < 2) throw new Error('方向の違う案を作れませんでした')
-  return unique.slice(0, count)
+  const variants = (Array.isArray(parsed.variants) ? parsed.variants : [])
+    .filter((value): value is { concept: string; prompt: string } =>
+      Boolean(value && typeof value === 'object' &&
+        typeof (value as { concept?: unknown }).concept === 'string' &&
+        typeof (value as { prompt?: unknown }).prompt === 'string'),
+    )
+    .map((value) => ({
+      concept: value.concept.replace(/\s+/g, ' ').trim(),
+      prompt: value.prompt.replace(/\s+/g, ' ').trim(),
+    }))
+    .filter(({ concept, prompt }) =>
+      Boolean(concept && prompt &&
+        !needsTranslation(concept) && !needsTranslation(prompt, input.text) &&
+        (!input.text || prompt.includes(input.text)) &&
+        !/[\u0000-\u001f\u007f]/.test(`${concept}${prompt}`) &&
+        prompt.toLowerCase() !== input.basePrompt.trim().toLowerCase()),
+    )
+  const uniqueConcepts = new Set(variants.map(({ concept }) => concept.toLowerCase()))
+  const uniquePrompts = new Set(variants.map(({ prompt }) => prompt.toLowerCase()))
+  if (variants.length < count || uniqueConcepts.size < count || uniquePrompts.size < count) {
+    throw new Error('方向の違うコンセプトを必要な数だけ作れませんでした')
+  }
+  return variants.slice(0, count).map(({ concept, prompt }) => {
+    const fullPrompt = `Visual concept: ${concept}. ${prompt}${artifactConstraint ? ` ${artifactConstraint}` : ''}`
+    if (fullPrompt.length > MAX_REWRITTEN_PROMPT_LENGTH) {
+      throw new Error('候補のプロンプトが長さの上限を超えました')
+    }
+    return fullPrompt
+  })
 }
 
 /**
