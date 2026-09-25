@@ -572,6 +572,13 @@ const REWRITE_RULES = [
 /** 1 回の送信で出せる候補の上限。1 枚 1〜3 分の直列実行なので、4 枚で 10 分前後になる */
 export const MAX_VARIANTS = 4
 
+export interface VariantConcept {
+  /** 利用者に見せる案名。画像モデルには渡さない */
+  concept: string
+  /** 画像モデルに渡す英語の指示全文 */
+  prompt: string
+}
+
 /** アプリ向けロゴの用途を、端末を描く指示と取り違えないための出力条件。 */
 export function appLogoArtifactConstraint(intent: string, lineage: string[] = []): string | undefined {
   const context = [...lineage, intent].join(' ')
@@ -631,13 +638,14 @@ export async function proposeVariantPrompts(input: {
   lineage?: string[]
   planner: AiPlannerConfig & { apiKey: string }
   signal?: AbortSignal
-}): Promise<string[]> {
+}): Promise<VariantConcept[]> {
   const count = Math.min(Math.max(Math.trunc(input.count), 2), MAX_VARIANTS)
   const artifactConstraint = appLogoArtifactConstraint(input.intent, input.lineage)
   const prompt = [
     `You are an art director developing ${count} different visual concepts from one image request.`,
     'First interpret the user goal, subject, medium, and explicit constraints. Then invent distinct visual concepts from that brief rather than copying or lightly paraphrasing the user instruction or baseline prompt.',
-    'Return JSON only: {"variants":[{"concept":"short English description of the visual idea","prompt":"concise English image-model instruction"}]}.',
+    'Return JSON only: {"variants":[{"concept":"short Japanese title of the visual idea","prompt":"concise English image-model instruction"}]}.',
+    'Write each concept in Japanese for the user. Write each prompt in English for the image model. Do not put the Japanese concept in the image prompt.',
     `Give exactly ${count} variants. Each concept must use a different motif or visual metaphor; changing only colour, layout, style, or seed does not make a new concept.`,
     'Each prompt must concretely describe only its own concept and the finished artwork. Do not include chat history, explanations, or a mockup of where the artwork will be used.',
     'Keep every explicit user constraint in all of them.',
@@ -673,7 +681,7 @@ export async function proposeVariantPrompts(input: {
     }))
     .filter(({ concept, prompt }) =>
       Boolean(concept && prompt &&
-        !needsTranslation(concept) && !needsTranslation(prompt, input.text) &&
+        /[\u3040-\u30ff\u3400-\u9fff]/.test(concept) && !needsTranslation(prompt, input.text) &&
         (!input.text || prompt.includes(input.text)) &&
         !/[\u0000-\u001f\u007f]/.test(`${concept}${prompt}`) &&
         prompt.toLowerCase() !== input.basePrompt.trim().toLowerCase()),
@@ -684,11 +692,11 @@ export async function proposeVariantPrompts(input: {
     throw new Error('方向の違うコンセプトを必要な数だけ作れませんでした')
   }
   return variants.slice(0, count).map(({ concept, prompt }) => {
-    const fullPrompt = `Visual concept: ${concept}. ${prompt}${artifactConstraint ? ` ${artifactConstraint}` : ''}`
+    const fullPrompt = `${prompt}${artifactConstraint ? ` ${artifactConstraint}` : ''}`
     if (fullPrompt.length > MAX_REWRITTEN_PROMPT_LENGTH) {
       throw new Error('候補のプロンプトが長さの上限を超えました')
     }
-    return fullPrompt
+    return { concept, prompt: fullPrompt }
   })
 }
 

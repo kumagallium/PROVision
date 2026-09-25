@@ -377,6 +377,11 @@ export function ChatPane({
                       ) : null}
                       {shown.length > 1 && act ? (
                         <div style={{ fontSize: 10, color: '#8b98a1', padding: '3px 1px 0' }}>
+                          {candidate.label !== act.intent ? (
+                            <div title={candidate.label} style={{ color: '#34536a', fontWeight: 700 }}>
+                              {candidate.label}
+                            </div>
+                          ) : null}
                           seed {act.seed}
                           {promptsDiffer ? (
                             <div

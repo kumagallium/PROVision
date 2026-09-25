@@ -69,6 +69,7 @@ import {
   planImageOperation,
   proposeVariantPrompts,
   appLogoArtifactConstraint,
+  type VariantConcept,
   type ImageToolName,
   type PlannedImageOperation,
   validateImagePlan,
@@ -1330,8 +1331,8 @@ app.post('/api/generate', async (c) => {
       ? Math.min(Math.max(Math.trunc(Number(body.variants ?? 1)) || 1, 1), MAX_VARIANTS)
       : 1
     const notices: string[] = []
-    let variantPrompts = [
-      artifactConstraint ? `${basePrompt} ${artifactConstraint}` : basePrompt,
+    let variantPrompts: Array<Pick<VariantConcept, 'prompt'> & Partial<Pick<VariantConcept, 'concept'>>> = [
+      { prompt: artifactConstraint ? `${basePrompt} ${artifactConstraint}` : basePrompt },
     ]
     if (wantedVariants > 1) {
       const planner = await plannerCredentials(CONFIG_DIR)
@@ -1340,7 +1341,7 @@ app.post('/api/generate', async (c) => {
           variantPrompts = await proposeVariantPrompts({
             intent: instruction,
             // 新規生成は利用者の目的からコンセプトを起こす。清書の文を種にしない。
-            basePrompt: plan.tool === 'image.generate' ? '' : variantPrompts[0]!,
+            basePrompt: plan.tool === 'image.generate' ? '' : variantPrompts[0]!.prompt,
             count: wantedVariants,
             ...(plan.arguments.text ? { text: plan.arguments.text } : {}),
             lineage: lineageIntents,
@@ -1371,13 +1372,13 @@ app.post('/api/generate', async (c) => {
 
     // 枚数ぶんまとめて決める。1 枚ずつ時刻から引くと、同じ送信の中で揃わない
     const stamp = Date.now()
-    const variants = variantPrompts.map((variantPrompt, index) => ({
-      prompt: variantPrompt,
+    const variants = variantPrompts.map((variant, index) => ({
+      ...variant,
       seed: usesImageModel
         ? Number.isInteger(body.seed) && variantPrompts.length === 1
           ? body.seed!
           : // 同じ指示を 2 回出しても違う絵が出るように、指示から決めた値をずらす
-            Number.parseInt(sha256(`${variantPrompt}${stamp}${index}`).slice(0, 8), 16) % 2 ** 31
+            Number.parseInt(sha256(`${variant.prompt}${stamp}${index}`).slice(0, 8), 16) % 2 ** 31
         : 0,
     }))
 
@@ -1392,7 +1393,7 @@ app.post('/api/generate', async (c) => {
 
     const entities: ImageEntity[] = []
     let firstError: unknown
-    for (const { prompt, seed } of variants) {
+    for (const { prompt, seed, concept } of variants) {
       try {
         entities.push(
           await serial(async () => {
@@ -1466,7 +1467,9 @@ app.post('/api/generate', async (c) => {
 
             const recorded = graph.recordGeneration({
               image: { digest },
-              label: body.label?.trim() || body.intent || '無題',
+              label: concept
+                ? [body.label?.trim(), concept].filter(Boolean).join(' — ')
+                : body.label?.trim() || body.intent || '無題',
               location: `images/${digest.slice(0, 16)}.png`,
               prompt,
               model: result.model,
