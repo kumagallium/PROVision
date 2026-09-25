@@ -599,7 +599,7 @@ describe('1つの指示から複数の候補（D-018）', () => {
   })
 
   it('方向の違う案を受け取る', async () => {
-    reply('{"variants":[{"concept":"Orbit","prompt":"A minimal constellation mark."},{"concept":"Star map","prompt":"A dense star map mark."}]}')
+    reply('{"variants":[{"concept":"軌道のしるし","prompt":"A minimal constellation mark."},{"concept":"星図のしるし","prompt":"A dense star map mark."}]}')
     const prompts = await proposeVariantPrompts({
       intent: '方向の違う案を出して',
       basePrompt: 'A constellation logo.',
@@ -608,13 +608,13 @@ describe('1つの指示から複数の候補（D-018）', () => {
     })
     expect(prompts).toHaveLength(2)
     expect(prompts).toEqual([
-      'Visual concept: Orbit. A minimal constellation mark.',
-      'Visual concept: Star map. A dense star map mark.',
+      { concept: '軌道のしるし', prompt: 'A minimal constellation mark.' },
+      { concept: '星図のしるし', prompt: 'A dense star map mark.' },
     ])
   })
 
   it('同じコンセプトが返ってきたら候補として採用しない', async () => {
-    reply('{"variants":[{"concept":"Same idea","prompt":"First mark."},{"concept":"Same idea","prompt":"Second mark."},{"concept":"Same idea","prompt":"Third mark."}]}')
+    reply('{"variants":[{"concept":"同じ案","prompt":"First mark."},{"concept":"同じ案","prompt":"Second mark."},{"concept":"同じ案","prompt":"Third mark."}]}')
     await expect(
       proposeVariantPrompts({
         intent: '案を3つ',
@@ -625,15 +625,22 @@ describe('1つの指示から複数の候補（D-018）', () => {
     ).rejects.toThrow(/方向の違うコンセプト/)
   })
 
+  it('英語の案名だけでは日本語の候補として採用しない', async () => {
+    reply('{"variants":[{"concept":"Orbit","prompt":"An orbit mark."},{"concept":"Star map","prompt":"A star map mark."}]}')
+    await expect(proposeVariantPrompts({
+      intent: '案を2つ', basePrompt: '', count: 2, planner,
+    })).rejects.toThrow(/方向の違うコンセプト/)
+  })
+
   it('描く文字列が決まっているなら、それを落とした案は捨てる', async () => {
-    reply('{"variants":[{"concept":"Serif","prompt":"Wordmark asterism in serif."},{"concept":"No text","prompt":"A mark with no lettering."},{"concept":"Circle","prompt":"asterism in a circle."}]}')
+    reply('{"variants":[{"concept":"セリフ体","prompt":"Wordmark asterism in serif."},{"concept":"文字なし","prompt":"A mark with no lettering."},{"concept":"円形","prompt":"asterism in a circle."}]}')
     await expect(proposeVariantPrompts({
       intent: '案を出して', basePrompt: 'x', count: 3, text: 'asterism', planner,
     })).rejects.toThrow(/必要な数/)
   })
 
   it('上限を超えて要求されても MAX_VARIANTS までしか返さない', async () => {
-    reply('{"variants":[{"concept":"A","prompt":"a"},{"concept":"B","prompt":"b"},{"concept":"C","prompt":"c"},{"concept":"D","prompt":"d"},{"concept":"E","prompt":"e"}]}')
+    reply('{"variants":[{"concept":"案一","prompt":"a"},{"concept":"案二","prompt":"b"},{"concept":"案三","prompt":"c"},{"concept":"案四","prompt":"d"},{"concept":"案五","prompt":"e"}]}')
     const prompts = await proposeVariantPrompts({
       intent: '案を出して',
       basePrompt: 'x',
@@ -646,13 +653,14 @@ describe('1つの指示から複数の候補（D-018）', () => {
   it('アプリのロゴでは端末モックアップを除外し、各案に条件を残す', async () => {
     const intent = 'iPhoneアプリ「おうち上映会」のロゴを4案作って'
     expect(appLogoArtifactConstraint(intent)).toContain('No smartphone')
-    reply('{"variants":[{"concept":"Home and play","prompt":"A house-shaped play symbol."},{"concept":"Window light","prompt":"A glowing window symbol."}]}')
+    reply('{"variants":[{"concept":"家と再生","prompt":"A house-shaped play symbol."},{"concept":"窓の光","prompt":"A glowing window symbol."}]}')
     const prompts = await proposeVariantPrompts({
       intent, basePrompt: intent, count: 2, planner,
     })
     expect(prompts).toHaveLength(2)
-    expect(prompts.every((prompt) => prompt.includes('isolated app logo artwork'))).toBe(true)
-    expect(prompts.every((prompt) => prompt.includes('No smartphone'))).toBe(true)
+    expect(prompts.every(({ prompt }) => prompt.includes('isolated app logo artwork'))).toBe(true)
+    expect(prompts.every(({ prompt }) => prompt.includes('No smartphone'))).toBe(true)
+    expect(prompts.every(({ prompt }) => !/[\u3040-\u30ff\u3400-\u9fff]/.test(prompt))).toBe(true)
     expect(appLogoArtifactConstraint('スマホをモチーフにしたアプリのロゴを描いて')).toBeUndefined()
     expect(appLogoArtifactConstraint('スマホの絵は不要です', [intent])).toContain('No smartphone')
     expect(appLogoArtifactConstraint('青くして', [intent])).toBeUndefined()

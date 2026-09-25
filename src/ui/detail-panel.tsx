@@ -53,6 +53,11 @@ export function DetailPanel({
 
   return (
     <div>
+      {entity.label !== activity.intent ? (
+        <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 700 }}>
+          {entity.label}
+        </p>
+      ) : null}
       <h3 style={H}>再実行に要る情報</h3>
       <code style={CODE}>
         {[
