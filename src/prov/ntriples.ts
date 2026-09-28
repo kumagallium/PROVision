@@ -107,6 +107,7 @@ export function toNTriples(graph: ProvGraph): string[] {
       ['reproducibility', a.reproducibility],
       ['pixelOrigin', a.pixelOrigin],
       ['planningMode', a.planningMode],
+      ['concept', a.concept],
       ['plannerProvider', a.plannerProvider],
       ['plannerModel', a.plannerModel],
       ['selectedTool', a.selectedTool],

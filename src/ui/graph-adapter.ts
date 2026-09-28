@@ -233,7 +233,9 @@ export function toFlow(
         activity,
         // 節点が見せるのは実行された全文（D-030）。意図は指示の節点が出す
         ...(executedPromptOf(activity) ? { prompt: executedPromptOf(activity) } : {}),
-        ...(activity.planId && generatedLabel ? { concept: generatedLabel } : {}),
+        ...(activity.concept || (activity.planId && generatedLabel)
+          ? { concept: activity.concept ?? generatedLabel }
+          : {}),
         planned: activity.planId !== undefined,
       },
     })

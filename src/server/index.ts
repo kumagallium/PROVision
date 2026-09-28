@@ -1363,7 +1363,7 @@ app.post('/api/generate', async (c) => {
     let variantPrompts: Array<Pick<VariantConcept, 'prompt'> & Partial<Pick<VariantConcept, 'concept'>>> = [
       { prompt: artifactConstraint ? `${basePrompt} ${artifactConstraint}` : basePrompt },
     ]
-    if (wantedVariants > 1) {
+    if (usesImageModel && (wantedVariants > 1 || !body.prompt?.trim())) {
       const planner = await plannerCredentials(CONFIG_DIR)
       if (planner?.enabled && planner.modelId.trim()) {
         try {
@@ -1381,20 +1381,25 @@ app.post('/api/generate', async (c) => {
           if (signal.aborted) throw error
           return c.json(
             {
-              error: `方向の違うコンセプトを作れなかったため、画像を生成しませんでした: ${
+              error: `コンセプトを作れなかったため、画像を生成しませんでした: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             },
             502,
           )
         }
-      } else {
+      } else if (wantedVariants > 1) {
         return c.json(
           { error: '異なるコンセプトの候補を作るには、設定で「指示のAI解釈」を有効にしてください' },
           400,
         )
+      } else {
+        notices.push(
+          'AI解釈が無効のためコンセプトを作らずに生成しました。設定で「指示のAI解釈」を有効にすると、候補1件でもコンセプトを作れます',
+        )
       }
-    } else if (usesImageModel && asksForMultipleCandidates(instruction)) {
+    }
+    if (wantedVariants === 1 && usesImageModel && asksForMultipleCandidates(instruction)) {
       // 黙って 1 枚だけ出すのが、この機能が無かったころの問題そのものだった
       notices.push(
         '複数の候補を頼まれていますが、候補の数が 1 になっています。チャット下の「候補」で数を選ぶと、まとめて出します',
@@ -1508,6 +1513,7 @@ app.post('/api/generate', async (c) => {
               label: concept
                 ? [body.label?.trim(), concept].filter(Boolean).join(' — ')
                 : body.label?.trim() || body.intent || '無題',
+              ...(concept ? { concept } : {}),
               location: `images/${digest.slice(0, 16)}.png`,
               prompt,
               model: result.model,

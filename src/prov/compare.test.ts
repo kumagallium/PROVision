@@ -153,6 +153,7 @@ describe('記録した項目の割り振り', () => {
   const complete: Required<GenerationActivity> = {
     id: 'urn:a',
     label: 'ラベル',
+    concept: '視覚コンセプト',
     prompt: 'prompt',
     model: 'model',
     seed: 1,
@@ -191,6 +192,7 @@ describe('記録した項目の割り振り', () => {
 
   /** 突き合わせる項目（`ACTIVITY_FIELDS` と 1 対 1） */
   const COMPARED = [
+    'concept',
     'prompt',
     'negativePrompt',
     'model',

@@ -62,6 +62,8 @@ export interface RecordGenerationInput {
    */
   image: Uint8Array | { digest: string }
   label: string
+  /** 候補ごとの日本語コンセプト。画像の名前とは別に Activity に残す */
+  concept?: string
   mediaType?: string
   location?: string
 
@@ -315,6 +317,7 @@ export class ProvGraph {
     const activity: GenerationActivity = {
       id: actId,
       label: input.intent?.trim() ? input.intent : input.label,
+      ...(input.concept ? { concept: input.concept } : {}),
       prompt: input.prompt,
       model: input.model,
       seed: input.seed,

@@ -6,6 +6,10 @@
       "@id": "provision:prompt",
       "@type": "xsd:string"
     },
+    "concept": {
+      "@id": "provision:concept",
+      "@type": "xsd:string"
+    },
     "negativePrompt": {
       "@id": "provision:negativePrompt",
       "@type": "xsd:string"
