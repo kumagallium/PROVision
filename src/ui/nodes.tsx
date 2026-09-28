@@ -129,11 +129,24 @@ export function ActivityNode({ data, selected }: NodeProps) {
   // 指示の節点が意図を出しているなら、ここでは繰り返さない。清書が無ければ意図しか無い
   const showIntent = !d.planned || !d.prompt
   const heading = d.concept ?? (showIntent ? d.label : undefined)
-  const hover = [heading, d.prompt].filter(Boolean).join('\n\n') || d.label
+  const hover = [showIntent && d.concept ? d.label : undefined, heading, d.prompt]
+    .filter(Boolean).join('\n\n') || d.label
   return (
     <div style={{ ...card(c.main, c.bg, selected === true), width: 248 }} title={hover}>
       <Handle type="target" position={Position.Top} />
       <div style={{ padding: '14px 14px 12px' }}>
+        {showIntent && d.concept ? (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ color: c.text, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
+              指示
+            </div>
+            <div style={{ color: '#3f4a52', fontSize: 12, lineHeight: 1.5,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden', overflowWrap: 'anywhere' }}>
+              {d.label}
+            </div>
+          </div>
+        ) : null}
         {heading ? (
           <div>
             <div style={{ color: c.text, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>

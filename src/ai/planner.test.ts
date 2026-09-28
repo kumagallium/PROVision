@@ -613,6 +613,20 @@ describe('1つの指示から複数の候補（D-018）', () => {
     ])
   })
 
+  it('候補が1件でも日本語コンセプトと独立した画像用プロンプトを作る', async () => {
+    reply('{"variants":[{"concept":"家族の記憶をつなぐ輪","prompt":"A simple circular emblem formed by three connected playback shapes, green on white. No phone or mockup."}]}')
+    const prompts = await proposeVariantPrompts({
+      intent: '家族の動画を共有するiPhoneアプリのロゴを作って',
+      basePrompt: '',
+      count: 1,
+      planner,
+    })
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]?.concept).toBe('家族の記憶をつなぐ輪')
+    expect(prompts[0]?.prompt).not.toContain('家族の動画を共有する')
+    expect(prompts[0]?.prompt).toContain('No smartphone')
+  })
+
   it('同じコンセプトが返ってきたら候補として採用しない', async () => {
     reply('{"variants":[{"concept":"同じ案","prompt":"First mark."},{"concept":"同じ案","prompt":"Second mark."},{"concept":"同じ案","prompt":"Third mark."}]}')
     await expect(

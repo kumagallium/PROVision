@@ -102,6 +102,7 @@ function activityNode(a: GenerationActivity): JsonLdNode {
     '@id': a.id,
     '@type': 'Activity',
     label: lit(a.label),
+    ...(a.concept ? { 'provision:concept': lit(a.concept) } : {}),
     startedAtTime: lit(a.startedAtTime, `${XSD}dateTime`),
     endedAtTime: lit(a.endedAtTime, `${XSD}dateTime`),
     'provision:prompt': lit(a.prompt),
@@ -504,6 +505,9 @@ export function fromProvJsonLd(doc: ProvJsonLdDocument, base: string): ProvGraph
       str(n, 'provision:planningMode') === 'llm' ||
       str(n, 'provision:planningMode') === 'author'
         ? { planningMode: str(n, 'provision:planningMode') as 'rules' | 'llm' | 'author' }
+        : {}),
+      ...(str(n, 'provision:concept') !== undefined
+        ? { concept: str(n, 'provision:concept')! }
         : {}),
       ...(str(n, 'provision:plannerProvider') !== undefined
         ? { plannerProvider: str(n, 'provision:plannerProvider')! }

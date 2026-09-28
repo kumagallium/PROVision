@@ -65,6 +65,7 @@ export function DetailPanel({
           // 別々に残しているのは突き合わせられるようにするためで（D-003）、
           // 片方しか見えないとその意味が無い。書き直しが入ればここで差が見える
           ...(activity.intent ? [`intent: ${activity.intent}`] : []),
+          ...(activity.concept ? [`concept: ${activity.concept}`] : []),
           `prompt: ${activity.prompt}`,
           ...(activity.negativePrompt ? [`negative prompt: ${activity.negativePrompt}`] : []),
           `model:  ${activity.model}`,

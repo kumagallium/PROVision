@@ -151,6 +151,7 @@ describe('PROV-JSONLD', () => {
     graph.recordGeneration({
       image: bytes('edited'),
       label: '文字を消した案',
+      concept: '余白を生かした記号',
       intent: 'ロゴタイプを消す',
       prompt: 'Edit the selected region',
       model: 'z-image-turbo-4bit',
@@ -177,6 +178,7 @@ describe('PROV-JSONLD', () => {
     expect(activity.maskImageDigest).toBe('b'.repeat(64))
     expect(activity.maskImageLocation).toBe('images/bbbbbbbbbbbbbbbb.png')
     expect(activity.planningMode).toBe('llm')
+    expect(activity.concept).toBe('余白を生かした記号')
     expect(activity.plannerProvider).toBe('openai-compatible')
     expect(activity.plannerModel).toBe('qwen2.5:3b')
     expect(activity.selectedTool).toBe('image.erase')

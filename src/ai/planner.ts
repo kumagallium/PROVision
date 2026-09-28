@@ -639,14 +639,17 @@ export async function proposeVariantPrompts(input: {
   planner: AiPlannerConfig & { apiKey: string }
   signal?: AbortSignal
 }): Promise<VariantConcept[]> {
-  const count = Math.min(Math.max(Math.trunc(input.count), 2), MAX_VARIANTS)
+  const count = Math.min(Math.max(Math.trunc(input.count), 1), MAX_VARIANTS)
   const artifactConstraint = appLogoArtifactConstraint(input.intent, input.lineage)
   const prompt = [
-    `You are an art director developing ${count} different visual concepts from one image request.`,
-    'First interpret the user goal, subject, medium, and explicit constraints. Then invent distinct visual concepts from that brief rather than copying or lightly paraphrasing the user instruction or baseline prompt.',
+    `You are an art director developing ${count} visual concept${count === 1 ? '' : 's'} from one image request.`,
+    'First interpret the user goal, subject, medium, and explicit constraints. Then invent a visual concept from that brief rather than copying or lightly paraphrasing the user instruction or baseline prompt.',
     'Return JSON only: {"variants":[{"concept":"short Japanese title of the visual idea","prompt":"concise English image-model instruction"}]}.',
     'Write each concept in Japanese for the user. Write each prompt in English for the image model. Do not put the Japanese concept in the image prompt.',
-    `Give exactly ${count} variants. Each concept must use a different motif or visual metaphor; changing only colour, layout, style, or seed does not make a new concept.`,
+    `Give exactly ${count} variant${count === 1 ? '' : 's'}.`,
+    ...(count > 1
+      ? ['Each concept must use a different motif or visual metaphor; changing only colour, layout, style, or seed does not make a new concept.']
+      : []),
     'Each prompt must concretely describe only its own concept and the finished artwork. Do not include chat history, explanations, or a mockup of where the artwork will be used.',
     'Keep every explicit user constraint in all of them.',
     // コンセプト出しでは新しいモチーフを許す。利用者の明示条件は保持する。
@@ -689,7 +692,9 @@ export async function proposeVariantPrompts(input: {
   const uniqueConcepts = new Set(variants.map(({ concept }) => concept.toLowerCase()))
   const uniquePrompts = new Set(variants.map(({ prompt }) => prompt.toLowerCase()))
   if (variants.length < count || uniqueConcepts.size < count || uniquePrompts.size < count) {
-    throw new Error('方向の違うコンセプトを必要な数だけ作れませんでした')
+    throw new Error(count === 1
+      ? '日本語コンセプトと画像用プロンプトを作れませんでした'
+      : '方向の違うコンセプトを必要な数だけ作れませんでした')
   }
   return variants.slice(0, count).map(({ concept, prompt }) => {
     const fullPrompt = `${prompt}${artifactConstraint ? ` ${artifactConstraint}` : ''}`

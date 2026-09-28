@@ -122,6 +122,26 @@ describe('React Flow への写し取り', () => {
     expect(activities.map((n) => n.data.concept).sort()).toEqual(['a', 'b'])
   })
 
+  it('候補1件でも記録されたコンセプトを生成ノードに表示する', () => {
+    const g = new ProvGraph()
+    g.recordGeneration({
+      image: bytes('single-concept'),
+      label: '家族の記憶をつなぐ輪',
+      concept: '家族の記憶をつなぐ輪',
+      intent: 'アプリのロゴを作って',
+      prompt: 'A circular logo with connected playback shapes.',
+      model: 'z-image-turbo-6bit',
+      seed: 5,
+      selectedTool: 'image.generate',
+      startedAtTime: '2026-09-29T00:00:00Z',
+      endedAtTime: '2026-09-29T00:01:00Z',
+    })
+    const activity = toFlow(g).nodes.find((node) => node.type === 'activity')!
+    expect(activity.data.concept).toBe('家族の記憶をつなぐ輪')
+    expect(activity.data.prompt).toBe('A circular logo with connected playback shapes.')
+    expect(activity.data.planned).toBe(false)
+  })
+
   it('清書を使わない道具や、意図と同じ文しか無い記録には清書を付けない', () => {
     const base = {
       id: 'x',

@@ -39,6 +39,7 @@ const ACTIVITY_FIELDS: ReadonlyArray<{
   label: string
   of: (a: GenerationActivity) => string | undefined
 }> = [
+  { label: 'concept', of: (a) => a.concept },
   { label: 'prompt', of: (a) => a.prompt },
   { label: 'negative prompt', of: (a) => a.negativePrompt },
   { label: 'model', of: (a) => a.model },

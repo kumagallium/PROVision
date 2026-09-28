@@ -39,6 +39,8 @@ export interface ReproducibleSpec {
 export interface GenerationActivity extends ReproducibleSpec {
   id: Iri
   label: string
+  /** AI が候補ごとに考えた日本語の視覚コンセプト。画像モデルへは渡さない */
+  concept?: string
   /** 利用者が出した自然言語の指示。辺ではなく Activity に置く（D-003） */
   intent?: string
   negativePrompt?: string
