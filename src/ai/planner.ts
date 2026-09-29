@@ -669,40 +669,69 @@ export async function proposeVariantPrompts(input: {
       : []),
   ].join('\n')
 
-  const parsed = extractJson(await callPlanner(input.planner, prompt, input.signal)) as {
-    variants?: unknown
-  }
-  const variants = (Array.isArray(parsed.variants) ? parsed.variants : [])
-    .filter((value): value is { concept: string; prompt: string } =>
-      Boolean(value && typeof value === 'object' &&
-        typeof (value as { concept?: unknown }).concept === 'string' &&
-        typeof (value as { prompt?: unknown }).prompt === 'string'),
-    )
-    .map((value) => ({
-      concept: value.concept.replace(/\s+/g, ' ').trim(),
-      prompt: value.prompt.replace(/\s+/g, ' ').trim(),
-    }))
-    .filter(({ concept, prompt }) =>
-      Boolean(concept && prompt &&
-        /[\u3040-\u30ff\u3400-\u9fff]/.test(concept) && !needsTranslation(prompt, input.text) &&
-        (!input.text || prompt.includes(input.text)) &&
-        !/[\u0000-\u001f\u007f]/.test(`${concept}${prompt}`) &&
-        prompt.toLowerCase() !== input.basePrompt.trim().toLowerCase()),
-    )
-  const uniqueConcepts = new Set(variants.map(({ concept }) => concept.toLowerCase()))
-  const uniquePrompts = new Set(variants.map(({ prompt }) => prompt.toLowerCase()))
-  if (variants.length < count || uniqueConcepts.size < count || uniquePrompts.size < count) {
-    throw new Error(count === 1
-      ? '日本語コンセプトと画像用プロンプトを作れませんでした'
-      : '方向の違うコンセプトを必要な数だけ作れませんでした')
-  }
-  return variants.slice(0, count).map(({ concept, prompt }) => {
-    const fullPrompt = `${prompt}${artifactConstraint ? ` ${artifactConstraint}` : ''}`
-    if (fullPrompt.length > MAX_REWRITTEN_PROMPT_LENGTH) {
-      throw new Error('候補のプロンプトが長さの上限を超えました')
+  const validated = (raw: string): VariantConcept[] | undefined => {
+    let parsed: unknown
+    try {
+      parsed = extractJson(raw)
+    } catch {
+      return undefined
     }
-    return { concept, prompt: fullPrompt }
-  })
+    if (!parsed || typeof parsed !== 'object') return undefined
+    const response = parsed as { variants?: unknown; concept?: unknown; prompt?: unknown }
+    // 単発では小さいモデルが配列を省いた形で返すこともある。
+    const items = Array.isArray(response.variants)
+      ? response.variants
+      : count === 1 ? [response] : []
+    const variants = items
+      .filter((value): value is { concept: string; prompt: string } =>
+        Boolean(value && typeof value === 'object' &&
+          typeof (value as { concept?: unknown }).concept === 'string' &&
+          typeof (value as { prompt?: unknown }).prompt === 'string'),
+      )
+      .map((value) => ({
+        concept: value.concept.replace(/\s+/g, ' ').trim(),
+        prompt: value.prompt.replace(/\s+/g, ' ').trim(),
+      }))
+      .filter(({ concept, prompt }) =>
+        Boolean(concept && prompt &&
+          /[\u3040-\u30ff\u3400-\u9fff]/.test(concept) && !needsTranslation(prompt, input.text) &&
+          (!input.text || prompt.includes(input.text)) &&
+          !/[\u0000-\u001f\u007f]/.test(`${concept}${prompt}`) &&
+          prompt.toLowerCase() !== input.basePrompt.trim().toLowerCase()),
+      )
+    const selected = variants.slice(0, count)
+    if (selected.length < count ||
+      new Set(selected.map(({ concept }) => concept.toLowerCase())).size < count ||
+      new Set(selected.map(({ prompt }) => prompt.toLowerCase())).size < count) return undefined
+    const complete = selected.map(({ concept, prompt }) => ({
+      concept,
+      prompt: `${prompt}${artifactConstraint ? ` ${artifactConstraint}` : ''}`,
+    }))
+    return complete.every(({ prompt }) => prompt.length <= MAX_REWRITTEN_PROMPT_LENGTH)
+      ? complete
+      : undefined
+  }
+
+  const first = validated(await callPlanner(input.planner, prompt, input.signal))
+  if (first) return first
+  input.signal?.throwIfAborted()
+  // 形式や言語の外れは、同じ長い指示を繰り返すより短い依頼で1回だけ修復する。
+  const repairPrompt = [
+    `Create exactly ${count} visual concept${count === 1 ? '' : 's'} for an image request.`,
+    'Return JSON only: {"variants":[{"concept":"日本語の短い案名","prompt":"English image instruction"}]}.',
+    'Each concept must be in Japanese. Each prompt must be in English, use at most 4 concise sentences, describe the finished artwork, preserve every explicit user constraint, and contain no device mockup unless requested.',
+    ...(count > 1 ? ['The concepts must use different motifs.'] : []),
+    ...(artifactConstraint ? [`Required output format: ${artifactConstraint}`] : []),
+    ...(input.text ? [`Include this exact lettering in every prompt: ${JSON.stringify(input.text)}`] : []),
+    ...(input.lineage?.length ? [`Prior context: ${JSON.stringify(input.lineage)}`] : []),
+    `User instruction: ${JSON.stringify(input.intent)}`,
+    ...(input.basePrompt.trim() ? [`Existing artwork instruction: ${JSON.stringify(input.basePrompt)}`] : []),
+  ].join('\n')
+  const repaired = validated(await callPlanner(input.planner, repairPrompt, input.signal))
+  if (repaired) return repaired
+  throw new Error(count === 1
+    ? '日本語コンセプトと画像用プロンプトを作れませんでした'
+    : '方向の違うコンセプトを必要な数だけ作れませんでした')
 }
 
 /**

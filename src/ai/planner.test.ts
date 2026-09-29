@@ -575,7 +575,7 @@ describe('1つの指示から複数の候補（D-018）', () => {
   const reply = (content: string) =>
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
+      vi.fn().mockImplementation(async () =>
         new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -625,6 +625,45 @@ describe('1つの指示から複数の候補（D-018）', () => {
     expect(prompts[0]?.concept).toBe('家族の記憶をつなぐ輪')
     expect(prompts[0]?.prompt).not.toContain('家族の動画を共有する')
     expect(prompts[0]?.prompt).toContain('No smartphone')
+  })
+
+  it('単発の返答が配列を省いても採用する', async () => {
+    reply('{"concept":"窓から広がる光","prompt":"A simple green window-shaped emblem with a play symbol."}')
+    const prompts = await proposeVariantPrompts({
+      intent: '動画共有アプリのロゴ', basePrompt: '', count: 1, planner,
+    })
+    expect(prompts[0]?.concept).toBe('窓から広がる光')
+    expect(prompts[0]?.prompt).toContain('A simple green window-shaped emblem with a play symbol.')
+    expect(prompts[0]?.prompt).toContain('No smartphone')
+  })
+
+  it('日本語の画像用プロンプトを返したら短い指示で1回作り直す', async () => {
+    const response = (content: string) => new Response(
+      JSON.stringify({ choices: [{ message: { content } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response('{"variants":[{"concept":"家と再生","prompt":"家の形のロゴ"}]}'))
+      .mockResolvedValueOnce(response('{"variants":[{"concept":"家と再生","prompt":"A green house-shaped play emblem."}]}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const prompts = await proposeVariantPrompts({
+      intent: '動画共有アプリのロゴ', basePrompt: '', count: 1, planner,
+    })
+    expect(prompts[0]?.concept).toBe('家と再生')
+    expect(prompts[0]?.prompt).toContain('A green house-shaped play emblem.')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('作り直しも無効なら2回で止まる', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(
+      JSON.stringify({ choices: [{ message: { content: '{"variants":[]}' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(proposeVariantPrompts({
+      intent: '動画共有アプリのロゴ', basePrompt: '', count: 1, planner,
+    })).rejects.toThrow(/日本語コンセプト/)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('同じコンセプトが返ってきたら候補として採用しない', async () => {
