@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.33](https://github.com/kumagallium/PROVision/compare/v0.2.32...v0.2.33) - 2026-09-29
+
+- fix: コンセプト作成失敗時に再試行して単発生成を続ける by @kumagallium in https://github.com/kumagallium/PROVision/pull/95
+
 ## [v0.2.32](https://github.com/kumagallium/PROVision/compare/v0.2.31...v0.2.32) - 2026-09-28
 
 - fix: 候補1件でも日本語コンセプトを作成する by @kumagallium in https://github.com/kumagallium/PROVision/pull/93
