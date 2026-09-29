@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.35](https://github.com/kumagallium/PROVision/compare/v0.2.34...v0.2.35) - 2026-09-29
+
+- fix: ロゴのAIコンセプトが失敗しても代替案を生成する by @kumagallium in https://github.com/kumagallium/PROVision/pull/99
+
 ## [v0.2.34](https://github.com/kumagallium/PROVision/compare/v0.2.33...v0.2.34) - 2026-09-29
 
 - fix: アプリロゴのコンセプト未生成時に元指示から描かない by @kumagallium in https://github.com/kumagallium/PROVision/pull/97
