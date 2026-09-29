@@ -1379,7 +1379,7 @@ app.post('/api/generate', async (c) => {
           })
         } catch (error) {
           if (signal.aborted) throw error
-          if (wantedVariants === 1) {
+          if (wantedVariants === 1 && !artifactConstraint) {
             notices.push('AIでコンセプトを作れなかったため、清書から画像を1件生成します')
           } else {
             return c.json(
@@ -1392,6 +1392,11 @@ app.post('/api/generate', async (c) => {
             )
           }
         }
+      } else if (artifactConstraint) {
+        return c.json(
+          { error: 'アプリロゴのコンセプトを作るには、設定で「指示のAI解釈」を有効にしてください' },
+          400,
+        )
       } else if (wantedVariants > 1) {
         return c.json(
           { error: '異なるコンセプトの候補を作るには、設定で「指示のAI解釈」を有効にしてください' },

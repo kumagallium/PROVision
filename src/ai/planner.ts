@@ -590,10 +590,11 @@ export function appLogoArtifactConstraint(intent: string, lineage: string[] = []
     return undefined
   }
   // 端末そのものを図案にしてほしいという明示指示は優先する。
-  if (!rejectsPhone && /(スマホ|スマートフォン|iPhone|phone|device).{0,20}(モチーフ|図案|描いて|入れて|incorporate|depict)/i.test(context)) {
+  if (!rejectsPhone && /(?:スマホ|スマートフォン|iPhone|phone|device)(?:そのもの|本体|の絵|を(?:モチーフ|図案|描いて|入れて))|(?:depict|draw|incorporate)\s+(?:a\s+)?(?:smartphone|iPhone|phone|device)/i.test(intent)) {
     return undefined
   }
-  return 'Create the isolated app logo artwork itself in a square icon composition. Fill the image with the logo design on a simple background. No smartphone, phone screen, device frame, app screenshot, user interface, presentation board, or product mockup.'
+  // 禁止対象の名前を画像モデルへ渡すと、それ自体が被写体として強調されることがある。
+  return 'Create only the standalone app logo artwork: a flat symbol centered in a square icon composition, filling the canvas on a simple background.'
 }
 
 /** 全角の数字を半角へ。指示は手で書かれるので、どちらでも来る */
@@ -643,14 +644,14 @@ export async function proposeVariantPrompts(input: {
   const artifactConstraint = appLogoArtifactConstraint(input.intent, input.lineage)
   const prompt = [
     `You are an art director developing ${count} visual concept${count === 1 ? '' : 's'} from one image request.`,
-    'First interpret the user goal, subject, medium, and explicit constraints. Then invent a visual concept from that brief rather than copying or lightly paraphrasing the user instruction or baseline prompt.',
+    'First interpret the user goal, subject, medium, and explicit constraints. Then invent a specific visual motif from that brief rather than copying or lightly paraphrasing the user instruction or baseline prompt. The Japanese concept must name the motif and its visual meaning, not restate the product description.',
     'Return JSON only: {"variants":[{"concept":"short Japanese title of the visual idea","prompt":"concise English image-model instruction"}]}.',
     'Write each concept in Japanese for the user. Write each prompt in English for the image model. Do not put the Japanese concept in the image prompt.',
     `Give exactly ${count} variant${count === 1 ? '' : 's'}.`,
     ...(count > 1
       ? ['Each concept must use a different motif or visual metaphor; changing only colour, layout, style, or seed does not make a new concept.']
       : []),
-    'Each prompt must concretely describe only its own concept and the finished artwork. Do not include chat history, explanations, or a mockup of where the artwork will be used.',
+    'Each prompt must concretely describe only its own concept and the finished artwork. Do not include chat history, explanations, or a mockup of where the artwork will be used. For standalone app logos, omit device and mockup words entirely, even in negative phrases.',
     'Keep every explicit user constraint in all of them.',
     // コンセプト出しでは新しいモチーフを許す。利用者の明示条件は保持する。
     ...REWRITE_RULES.filter((rule) => rule !== STYLE_REWRITE_RULE && rule !== 'Up to 4 sentences. Be specific rather than long.'),
@@ -697,7 +698,8 @@ export async function proposeVariantPrompts(input: {
           /[\u3040-\u30ff\u3400-\u9fff]/.test(concept) && !needsTranslation(prompt, input.text) &&
           (!input.text || prompt.includes(input.text)) &&
           !/[\u0000-\u001f\u007f]/.test(`${concept}${prompt}`) &&
-          prompt.toLowerCase() !== input.basePrompt.trim().toLowerCase()),
+          prompt.toLowerCase() !== input.basePrompt.trim().toLowerCase() &&
+          (!artifactConstraint || !/\b(?:smartphone|i\s*phone|phone|handset|device|screen|screenshot|mockup|interface|ui)\b/i.test(prompt))),
       )
     const selected = variants.slice(0, count)
     if (selected.length < count ||
@@ -719,7 +721,7 @@ export async function proposeVariantPrompts(input: {
   const repairPrompt = [
     `Create exactly ${count} visual concept${count === 1 ? '' : 's'} for an image request.`,
     'Return JSON only: {"variants":[{"concept":"日本語の短い案名","prompt":"English image instruction"}]}.',
-    'Each concept must be in Japanese. Each prompt must be in English, use at most 4 concise sentences, describe the finished artwork, preserve every explicit user constraint, and contain no device mockup unless requested.',
+    'Each concept must be in Japanese and name a concrete visual motif and its meaning. Each prompt must be in English, use at most 4 concise sentences, describe the finished artwork, and preserve every explicit user constraint. For standalone app logos, omit device and mockup words entirely, including negative phrases.',
     ...(count > 1 ? ['The concepts must use different motifs.'] : []),
     ...(artifactConstraint ? [`Required output format: ${artifactConstraint}`] : []),
     ...(input.text ? [`Include this exact lettering in every prompt: ${JSON.stringify(input.text)}`] : []),
