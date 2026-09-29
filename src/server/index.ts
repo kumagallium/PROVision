@@ -65,6 +65,7 @@ import {
   SynthesisForbiddenError,
   asksForMultipleCandidates,
   editScopeOf,
+  fallbackAppLogoVariants,
   needsTranslation,
   planImageOperation,
   proposeVariantPrompts,
@@ -1363,6 +1364,14 @@ app.post('/api/generate', async (c) => {
     let variantPrompts: Array<Pick<VariantConcept, 'prompt'> & Partial<Pick<VariantConcept, 'concept'>>> = [
       { prompt: artifactConstraint ? `${basePrompt} ${artifactConstraint}` : basePrompt },
     ]
+    const fallbackLogo = () => plan.tool === 'image.generate'
+      ? fallbackAppLogoVariants({
+          intent: instruction,
+          count: wantedVariants,
+          ...(plan.arguments.text ? { text: plan.arguments.text } : {}),
+          lineage: lineageIntents,
+        })
+      : undefined
     if (usesImageModel && (wantedVariants > 1 || !body.prompt?.trim())) {
       const planner = await plannerCredentials(CONFIG_DIR)
       if (planner?.enabled && planner.modelId.trim()) {
@@ -1379,7 +1388,11 @@ app.post('/api/generate', async (c) => {
           })
         } catch (error) {
           if (signal.aborted) throw error
-          if (wantedVariants === 1 && !artifactConstraint) {
+          const fallback = fallbackLogo()
+          if (fallback) {
+            variantPrompts = fallback
+            notices.push('AIのコンセプトを採用できなかったため、依頼の要素から代替案を作りました')
+          } else if (wantedVariants === 1 && !artifactConstraint) {
             notices.push('AIでコンセプトを作れなかったため、清書から画像を1件生成します')
           } else {
             return c.json(
@@ -1392,11 +1405,9 @@ app.post('/api/generate', async (c) => {
             )
           }
         }
-      } else if (artifactConstraint) {
-        return c.json(
-          { error: 'アプリロゴのコンセプトを作るには、設定で「指示のAI解釈」を有効にしてください' },
-          400,
-        )
+      } else if (artifactConstraint && plan.tool === 'image.generate') {
+        variantPrompts = fallbackLogo() ?? variantPrompts
+        notices.push('AI解釈が無効のため、依頼の要素から代替コンセプトを作りました')
       } else if (wantedVariants > 1) {
         return c.json(
           { error: '異なるコンセプトの候補を作るには、設定で「指示のAI解釈」を有効にしてください' },

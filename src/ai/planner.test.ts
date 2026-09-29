@@ -6,6 +6,7 @@ import {
   appLogoArtifactConstraint,
   asksForMultipleCandidates,
   editScopeOf,
+  fallbackAppLogoVariants,
   needsTranslation,
   planImageOperation,
   proposeVariantPrompts,
@@ -735,6 +736,31 @@ describe('1つの指示から複数の候補（D-018）', () => {
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(prompts[0]?.prompt).not.toMatch(/phone|screen|mockup/i)
+  })
+
+  it('AIが案を返せなくても依頼の要素から4件のロゴ案を作れる', () => {
+    const variants = fallbackAppLogoVariants({
+      intent: '「おうち上映会」というiPhoneアプリのロゴ。ひらがなの「お」をモチーフにして、右上の点を再生ボタンに。全体は連続再生の円。色はエメラルドグリーン。',
+      count: 4,
+    })
+    expect(variants).toHaveLength(4)
+    expect(new Set(variants?.map(({ concept }) => concept)).size).toBe(4)
+    expect(variants?.every(({ concept, prompt }) =>
+      /[\u3040-\u30ff\u3400-\u9fff]/.test(concept) &&
+      prompt.includes('hiragana "お"') &&
+      prompt.includes('top-right dot') &&
+      prompt.includes('circular outline') &&
+      prompt.includes('emerald green') &&
+      !/phone|screen|device|mockup/i.test(prompt))).toBe(true)
+  })
+
+  it('AIの代替案でも明示された描画文字列を残す', () => {
+    const variants = fallbackAppLogoVariants({
+      intent: '星のデータを理解につなげるアプリのロゴ', count: 2, text: 'asterism',
+    })
+    expect(variants?.map(({ concept }) => concept)).toEqual(['星を結ぶ知の輪', '知識が育つ星の枝'])
+    expect(variants?.every(({ prompt }) => prompt.includes('"asterism"'))).toBe(true)
+    expect(fallbackAppLogoVariants({ intent: '風景画を描いて', count: 1 })).toBeUndefined()
   })
 })
 

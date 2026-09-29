@@ -579,6 +579,73 @@ export interface VariantConcept {
   prompt: string
 }
 
+/** AIが有効な案を返せない場合も、用途と明示条件からロゴ案を組み立てる。 */
+export function fallbackAppLogoVariants(input: {
+  intent: string
+  count: number
+  text?: string
+  lineage?: string[]
+}): VariantConcept[] | undefined {
+  const constraint = appLogoArtifactConstraint(input.intent, input.lineage)
+  if (!constraint) return undefined
+
+  const brief = [...(input.lineage ?? []), input.intent].join(' ')
+  const count = Math.min(Math.max(Math.trunc(input.count) || 1, 1), MAX_VARIANTS)
+  const quotedLetter = /(?:ひらがな|文字|字).{0,12}[「『]([ぁ-んァ-ン])[」』]/.exec(brief)?.[1]
+    ?? /[「『]([ぁ-んァ-ン])[」』].{0,12}(?:モチーフ|中心|図案)/.exec(brief)?.[1]
+  const color = /#[0-9a-fA-F]{6}\b/.exec(brief)?.[0]
+    ?? (/(?:エメラルド|emerald)/i.test(brief) ? 'emerald green'
+      : /(?:青|ブルー|blue)/i.test(brief) ? 'blue'
+      : /(?:赤|レッド|red)/i.test(brief) ? 'red'
+      : /(?:緑|グリーン|green)/i.test(brief) ? 'green'
+      : 'one restrained accent color')
+  const isVideo = /(動画|映像|上映|再生|アルバム|video|movie|playback)/i.test(brief)
+  const isStar = /(星|星座|宇宙|天体|asterism|constellation|ontology|オントロジー)/i.test(brief)
+  const hasCircle = /(円|輪|循環|連続再生|circle|loop)/i.test(brief)
+  const hasHome = /(家族|おうち|家庭|家|home|family)/i.test(brief)
+  const letter = quotedLetter
+    ? `Use a clearly recognizable Japanese hiragana ${JSON.stringify(quotedLetter)} as the central mark. `
+    : ''
+  const playDot = quotedLetter && /(右上の点|点を再生|点.*再生ボタン)/.test(brief)
+    ? 'Shape the top-right dot of the character as a small playback triangle. '
+    : ''
+  const circle = hasCircle ? 'Keep a continuous circular outline around the central mark. ' : ''
+  const lettering = input.text ? `Include the exact lettering ${JSON.stringify(input.text)}. ` : ''
+
+  const motifs: Array<{ concept: string; art: string }> = quotedLetter && isVideo
+    ? [
+        { concept: `再生が巡る「${quotedLetter}」`, art: 'Build the mark from one continuous rounded stroke suggesting replay and shared memories.' },
+        { concept: `記憶を包む「${quotedLetter}」`, art: 'Surround the character with three small connected memory dots in a balanced ring.' },
+        { concept: `映写がつながる「${quotedLetter}」`, art: 'Integrate three minimal frame shapes into the circular stroke, suggesting a sequence of shared clips.' },
+        { concept: `家族が集まる「${quotedLetter}」`, art: 'Use three converging curved paths around the character to suggest people gathering around one story.' },
+      ]
+    : isStar
+      ? [
+          { concept: '星を結ぶ知の輪', art: 'Connect a few small stars with fine geometric lines to form a unified circular constellation.' },
+          { concept: '知識が育つ星の枝', art: 'Form a restrained branching tree from linked star points, showing knowledge growing together.' },
+          { concept: '星図の交点', art: 'Arrange intersecting orbital lines and a central star into a simple geometric emblem.' },
+          { concept: '点から広がる宇宙', art: 'Let a small cluster of data dots radiate into a balanced constellation symbol.' },
+        ]
+      : isVideo
+        ? [
+            { concept: '記憶をつなぐ再生の輪', art: 'Form a continuous loop from a subtle playback triangle and three linked memory dots.' },
+            { concept: hasHome ? '家族が集まる光の窓' : '映像を映す光の窓', art: 'Combine a simple window-like opening with a small playback triangle at its center.' },
+            { concept: '映像が続く軌跡', art: 'Join three minimal frame shapes along one curved playback path.' },
+            { concept: '共有する一瞬の光', art: 'Arrange three small light shapes around a central playback symbol.' },
+          ]
+        : [
+            { concept: 'つながる線の輪', art: 'Interlock two rounded paths into one simple, balanced emblem.' },
+            { concept: '広がる光のしるし', art: 'Form a restrained radial symbol from a central point and a few clean rays.' },
+            { concept: 'ひらく形のしるし', art: 'Open three curved shapes around a clear central space.' },
+            { concept: '集まる点のしるし', art: 'Gather a few dots into a compact geometric symbol with one focal point.' },
+          ]
+
+  return motifs.slice(0, count).map(({ concept, art }) => ({
+    concept,
+    prompt: `${constraint} ${letter}${playDot}${circle}${art} Use ${color} with solid fills, clean edges, and generous negative space. ${lettering}`.trim(),
+  }))
+}
+
 /** アプリ向けロゴの用途を、端末を描く指示と取り違えないための出力条件。 */
 export function appLogoArtifactConstraint(intent: string, lineage: string[] = []): string | undefined {
   const context = [...lineage, intent].join(' ')
