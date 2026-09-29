@@ -1379,14 +1379,18 @@ app.post('/api/generate', async (c) => {
           })
         } catch (error) {
           if (signal.aborted) throw error
-          return c.json(
-            {
-              error: `コンセプトを作れなかったため、画像を生成しませんでした: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            },
-            502,
-          )
+          if (wantedVariants === 1) {
+            notices.push('AIでコンセプトを作れなかったため、清書から画像を1件生成します')
+          } else {
+            return c.json(
+              {
+                error: `コンセプトを作れなかったため、画像を生成しませんでした: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              },
+              502,
+            )
+          }
         }
       } else if (wantedVariants > 1) {
         return c.json(
