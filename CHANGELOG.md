@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.2.34](https://github.com/kumagallium/PROVision/compare/v0.2.33...v0.2.34) - 2026-09-29
+
+- fix: アプリロゴのコンセプト未生成時に元指示から描かない by @kumagallium in https://github.com/kumagallium/PROVision/pull/97
+
 ## [v0.2.33](https://github.com/kumagallium/PROVision/compare/v0.2.32...v0.2.33) - 2026-09-29
 
 - fix: コンセプト作成失敗時に再試行して単発生成を続ける by @kumagallium in https://github.com/kumagallium/PROVision/pull/95
