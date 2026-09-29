@@ -614,7 +614,7 @@ describe('1つの指示から複数の候補（D-018）', () => {
   })
 
   it('候補が1件でも日本語コンセプトと独立した画像用プロンプトを作る', async () => {
-    reply('{"variants":[{"concept":"家族の記憶をつなぐ輪","prompt":"A simple circular emblem formed by three connected playback shapes, green on white. No phone or mockup."}]}')
+    reply('{"variants":[{"concept":"家族の記憶をつなぐ輪","prompt":"A simple circular emblem formed by three connected playback shapes, green on white."}]}')
     const prompts = await proposeVariantPrompts({
       intent: '家族の動画を共有するiPhoneアプリのロゴを作って',
       basePrompt: '',
@@ -624,7 +624,8 @@ describe('1つの指示から複数の候補（D-018）', () => {
     expect(prompts).toHaveLength(1)
     expect(prompts[0]?.concept).toBe('家族の記憶をつなぐ輪')
     expect(prompts[0]?.prompt).not.toContain('家族の動画を共有する')
-    expect(prompts[0]?.prompt).toContain('No smartphone')
+    expect(prompts[0]?.prompt).toContain('standalone app logo artwork')
+    expect(prompts[0]?.prompt).not.toMatch(/phone|mockup/i)
   })
 
   it('単発の返答が配列を省いても採用する', async () => {
@@ -634,7 +635,7 @@ describe('1つの指示から複数の候補（D-018）', () => {
     })
     expect(prompts[0]?.concept).toBe('窓から広がる光')
     expect(prompts[0]?.prompt).toContain('A simple green window-shaped emblem with a play symbol.')
-    expect(prompts[0]?.prompt).toContain('No smartphone')
+    expect(prompts[0]?.prompt).toContain('standalone app logo artwork')
   })
 
   it('日本語の画像用プロンプトを返したら短い指示で1回作り直す', async () => {
@@ -705,18 +706,35 @@ describe('1つの指示から複数の候補（D-018）', () => {
 
   it('アプリのロゴでは端末モックアップを除外し、各案に条件を残す', async () => {
     const intent = 'iPhoneアプリ「おうち上映会」のロゴを4案作って'
-    expect(appLogoArtifactConstraint(intent)).toContain('No smartphone')
+    expect(appLogoArtifactConstraint(intent)).toContain('standalone app logo artwork')
     reply('{"variants":[{"concept":"家と再生","prompt":"A house-shaped play symbol."},{"concept":"窓の光","prompt":"A glowing window symbol."}]}')
     const prompts = await proposeVariantPrompts({
       intent, basePrompt: intent, count: 2, planner,
     })
     expect(prompts).toHaveLength(2)
-    expect(prompts.every(({ prompt }) => prompt.includes('isolated app logo artwork'))).toBe(true)
-    expect(prompts.every(({ prompt }) => prompt.includes('No smartphone'))).toBe(true)
+    expect(prompts.every(({ prompt }) => prompt.includes('standalone app logo artwork'))).toBe(true)
+    expect(prompts.every(({ prompt }) => !/phone|mockup/i.test(prompt))).toBe(true)
     expect(prompts.every(({ prompt }) => !/[\u3040-\u30ff\u3400-\u9fff]/.test(prompt))).toBe(true)
     expect(appLogoArtifactConstraint('スマホをモチーフにしたアプリのロゴを描いて')).toBeUndefined()
-    expect(appLogoArtifactConstraint('スマホの絵は不要です', [intent])).toContain('No smartphone')
+    expect(appLogoArtifactConstraint('スマホの絵は不要です', [intent])).toContain('standalone app logo artwork')
+    expect(appLogoArtifactConstraint('iPhoneアプリのロゴを描いて')).toContain('standalone app logo artwork')
     expect(appLogoArtifactConstraint('青くして', [intent])).toBeUndefined()
+  })
+
+  it('ロゴ案が端末を被写体にしていたら再提案させる', async () => {
+    const response = (content: string) => new Response(
+      JSON.stringify({ choices: [{ message: { content } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response('{"variants":[{"concept":"再生の輪","prompt":"A green logo on a smartphone screen."}]}'))
+      .mockResolvedValueOnce(response('{"variants":[{"concept":"再生の輪","prompt":"An emerald circle formed by a continuous playback arrow."}]}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const prompts = await proposeVariantPrompts({
+      intent: 'iPhoneアプリのロゴを描いて', basePrompt: '', count: 1, planner,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(prompts[0]?.prompt).not.toMatch(/phone|screen|mockup/i)
   })
 })
 
